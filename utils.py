@@ -2,6 +2,7 @@ import glob
 from multiprocessing import Process,Queue,cpu_count
 import time
 import os
+import json
 
 #watchdog terminates processes after timeout
 #and delete left files
@@ -58,3 +59,15 @@ def parse_asan(pid, stderr):
     if crash:
         print "Crash: " + crash
     return crash, bitsets
+
+def save_json(fname, data):
+    with open(fname, "w") as f:
+        f.write(json.dumps(data))
+
+def save_data(fname, data):
+    with open(fname, "w") as f:
+        f.write(data)
+
+def load_json(fname):
+    with open(fname, "r") as f:
+        return json.loads(f.read())

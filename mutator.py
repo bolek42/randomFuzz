@@ -75,7 +75,7 @@ class mutator(seeds):
             state["offset"] = randrange(max(1, mutator["len"]-4))
             mutator["mutations"] += [state]
             mutator["state"] = state
-            mutator["mutation"] = state["description"]
+            mutator["description"] = state["description"]
 
         return mutator
                 

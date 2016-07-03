@@ -95,10 +95,10 @@ class seeds:
             return self.pascal_string(s) + self.c_string(s)
         ret = []
         ret += string("%n"*16)
-        ret += string("%n"*0x7f)
-        ret += string("%n"*0xff)
-        ret += string("%n"*1024)
-        ret += string("%n"*4095)
+        ret += string("B"*0x7f)
+        ret += string("B"*0xff)
+        #ret += string("%n"*1024)
+        #ret += string("%n"*4095)
 
         for c in "\x00 !\"$%&/()=?,;.:-_#'+*<>|":
             ret += [c*16]

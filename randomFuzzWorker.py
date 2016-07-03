@@ -27,9 +27,11 @@ class randomFuzzWorker():
 
         self.bitsets = {}
         self.testcases = []
+        self.executed_testcases = Value('i', 0)
 
         self.watchDog = watchDog()
         self.work_queue = Queue()
+        self.testcase_count = Queue()
         self.update_queues = []
 
         self.testcase_report = Queue()
@@ -108,6 +110,9 @@ class randomFuzzWorker():
             while self.crash_report.qsize() > 0:
                 t = self.crash_report.get()
                 report["crash_report"].append(t)
+
+            report["executed_testcases"] = self.executed_testcases.value
+            self.executed_testcases.value = 0
                 
             data = json.dumps(report)
             sock.send(struct.pack('<I',len(data)))
@@ -126,8 +131,7 @@ class randomFuzzWorker():
                 for s,bitset in update["bitset_update"].iteritems():
                     self.bitsets[s] = bitset
 
-                for crash_addr in update["crash_update"]:
-                    self.crash_addr += [crash_addr]
+                self.crash_addr = update["crash_addr"]
 
 
             #initial and deterministic testcases
@@ -141,11 +145,13 @@ class randomFuzzWorker():
                 self.execute_testcase(mutated)
 
     def execute_testcase(self, testcase):
+        self.executed_testcases.value += 1
         try:
             stderr, crash, bitsets = self.callback(self, testcase)
             self.process_result( testcase, stderr, crash, bitsets)
         except:
             import traceback; traceback.print_exc()
+            pass
 
     #detect new edges/crashes and appends to report queues
     def process_result(self, testcase, stderr, crash, bitsets):
@@ -169,15 +175,18 @@ class randomFuzzWorker():
 
         #detect new crash
         if crash and crash not in self.crash_addr:
-            self.crash_id += 1
             print "New crash %s" % crash
+            testcase["crash"] = crash
+            testcase["stderr"] = stderr
             self.crash_report.put(testcase)
 
     #genetic methods
     def get_testcases(self):
         for tid in xrange(len(self.testcases)):
+            merged = self.random_merge(tid)
+            if merged:
+                yield merged
             #get
-            self.random_merge(tid)
             testcase = self.testcases[tid]
             mutated = deepcopy(testcase)
 
@@ -192,16 +201,21 @@ class randomFuzzWorker():
     #to mutator
     def random_merge(self, tid1):
         try:
-            tid2 = choice(len(self.testcases))
+            tid2 = randrange(len(self.testcases))
             if tid1 != tid2:
                 mutated = deepcopy(self.testcases[tid1])
-                l1 = randrange(len(mutated["mutations"]))
-                l2 = randrange(len(self.testcases[tid2]["mutations"]))
-                mutated["mutations"] = mutated["mutations"][:l1] + self.testcases[tid2]["mutations"][:l2]
-                mutated["mutation"] = "radnom merge %d-%d" % (tid1,tid2)
+                name = choice(mutated["mutators"].keys())
+                mutator1 = mutated["mutators"][name]
+                mutator2 = self.testcases[tid2]["mutators"][name]
+                l1 = randrange(len(mutator1["mutations"])) if len(mutator1["mutations"]) > 0 else 0
+                l2 = randrange(len(mutator2["mutations"])) if len(mutator2["mutations"]) > 0 else 0
+                mutator1["mutations"] = mutator1["mutations"][:l1] + mutator2["mutations"][:l2]
+                mutated["mutators"][name] = mutator1
+                mutated["description"] = "radnom merge %d-%d" % (tid1,tid2)
                 mutated["parent_id"] = tid1
-                self.work_queue.put(mutated)
+                return mutated
         except:
+            import traceback; traceback.print_exc()
             pass
 
 
@@ -222,5 +236,4 @@ if __name__ == "__main__":
             os.kill(os.getpid(), 9)
         except:
             import traceback; traceback.print_exc()
-            time.sleep(1)
-    os.kill(os.getpid(), 9)
+            os.kill(os.getpid(), 9)

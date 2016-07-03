@@ -38,8 +38,6 @@ class randomFuzz:
 
         self.seeds = seeds
         self.port = port
-        self.tid = 0
-        self.testcase_id = 0
         self.bitsets = {}
         self.initial_testcases = Queue()
 
@@ -51,17 +49,16 @@ class randomFuzz:
             self.files.append(os.path.basename(fname))
         os.chdir(workdir)
 
-
         self.crash_addr = [] #addresses of crashes
         self.crash_id = 0
 
         self.rate = 0 #testcases per second
-        self.messages = [] #new testcase messages
-        self.testcases_total = 0
+        self._log = [] #new testcase messages
+        self.total_testcases = 0
         self.t0 = time.time()
 
         self.initial_testcase = dict()
-        self.initial_testcase["id"] = self.tid
+        self.initial_testcase["id"] = 0
         self.initial_testcase["parent_id"] = 0
         self.initial_testcase["mutators"] = {}
         self.initial_testcase["description"] = ""
@@ -70,26 +67,24 @@ class randomFuzz:
     def add_mutator(self, name):
         mutator = {}
         mutator["mutations"] = []
+        mutator["len"] = 42 #XXX dirty fix for missing length
         self.initial_testcase["mutators"][name] = mutator
         
-
-
-
     def launch(self):
+        self.initial_testcases.put(self.initial_testcase)
         try:
             self.restore_state()
+            pass
         except:
             pass
             import traceback; traceback.print_exc()
 
-        self.initial_testcases.put(self.initial_testcase)
-        #self.init_testcases()
 
         #start listener
-        Thread(target=self.listener).start()
+        Thread(target=self.ui).start()
 
         try:
-            self.run()
+            self.accept()
         except KeyboardInterrupt:
             import traceback; traceback.print_exc()
             os.kill(os.getpid(), 9)
@@ -97,44 +92,18 @@ class randomFuzz:
 
 
     def restore_state(self):
-        return
         try:
-            self.crash_addr = json.loads(open("crash_addr.json", "r").read())
+            testcases = load_json("testcases.json")
+            self.log("Loaded %d testcases" % len(testcases))
+            for testcase in testcases:
+                self.initial_testcases.put(testcase)
+            self.crash_addr = load_json("crash_addr.json")
         except:
             pass
-        self.crash_id = len(self.crash_addr)
 
-        self.bitsets = {}
-        #restore testcases and queue
-        testcases = json.loads(open("testcases.json", "r").read())
-        for tid,testcase in testcases.iteritems():
-            tid = int(tid)
-            self.testcases[tid] = testcase
-            self.work_queue.put(testcase)
-            self.tid += 1
-
-    def new_testcase(self, mutated, new_blocks):
-        #add new testcase seed
-        mutated["id"] = self.tid
-        mutated["state"]["offset"] = -1
-        mutated["prio"] = -1
-        mutated["new_blocks"] = new_blocks
-        
-        self.testcases[self.tid] = mutated
-        self.tid += 1
-
-        with open("testcases.json", "w") as f:
-            f.write(json.dumps(self.testcases))
-        #with open("testcase-%d" % (mutated["id"]), "wb") as f:
-        #    data = self.callback(self, mutated)
-        #    f.write(data)
-
-    def run(self):
-        while True:
-            time.sleep(1)
 
     #network
-    def listener(self):
+    def accept(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("0.0.0.0", self.port))
@@ -182,7 +151,7 @@ class randomFuzz:
                 if len(update["testcase_update"]) > 0:
                     update["bitset_update"] = self.bitsets
 
-                update["crash_update"] = []
+                update["crash_addr"] = self.crash_addr
 
                 s = json.dumps(update)
                 conn.send(struct.pack('<I',len(s)))
@@ -194,10 +163,10 @@ class randomFuzz:
                 while len(d) < n:
                     d += conn.recv(n-len(d))
                 report = json.loads(d)
-
+                self.total_testcases += report["executed_testcases"]
 
                 #process testcase update
-                for testcase in report["testcase_report"]:
+                for testcase in report["testcase_report"] + report["crash_report"]:
                     bitsets = testcase["bitsets"]
 
                     for s in bitsets:
@@ -210,11 +179,23 @@ class randomFuzz:
                         new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
                         self.bitsets[s] |= bitset
                     if new_blocks > 0:
-                        print "New Blocks: %d %s" % (new_blocks, testcase["description"])
                         testcase["new_blocks"] = new_blocks
                         testcase["blocks"] = blocks
                         testcase["id"] = len(self.testcases)
+                        self.log("New Blocks: %d %s" % (new_blocks, testcase["description"]))
+                        save_json("testcases.json", self.testcases)
+                        save_json("testcase-%d.json" % (len(self.testcases)),testcase)
                         self.testcases.append(testcase)
+
+                for testcase in report["crash_report"]:
+                    crash = testcase["crash"]
+                    if crash not in self.crash_addr:
+                        self.log("New Crash @ %s !!" % (crash))
+                        save_json("crash_addr.json", self.crash_addr)
+                        save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
+                        save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
+
+                        self.crash_addr += [crash]
 
                 time.sleep(1)
 
@@ -222,30 +203,28 @@ class randomFuzz:
             import traceback; traceback.print_exc()
             conn.close()
             return
-
     
     #ui
     def ui(self):
         n_old = start = stop = 0
         while True:
-            sleep(1)
+            time.sleep(1)
             #determine testaces per second
-            stop = time()
+            stop = time.time()
             alpha =  0.5
-            n = self.testcases_total - n_old
-            n_old = self.testcases_total
+            n = self.total_testcases - n_old
+            n_old = self.total_testcases
             self.rate = self.rate * alpha + (1-alpha) * n/(stop - start)
             start = stop
 
             #print stuff
             print "\x1b[0;0H"+"\x1b[2J"+"\r", 
             print "-=randomFuzz=-"
-            print "Testcase: %d (%d total)" % (self.testcase_id, self.tid)
+            print "Testcases: %d" % (len(self.testcases))
             print "Rate: %.2f/s" % self.rate
-            print "Total testcases: %d" % self.testcases_total
+            print "Total testcases: %d" % self.total_testcases
             print "Crash: %d" % len(self.crash_addr)
-            print "Work Queue: %d" % (self.work_queue.qsize())
-            t = time() - self.t0
+            t = time.time() - self.t0
             print "Time: %dd %dh %dm %ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"
             for s in self.bitsets:
@@ -254,8 +233,13 @@ class randomFuzz:
                 print "%s: %d covered, %d missing" % (s,covered,missing)
 
             print "\nLog:"
-            for message in self.messages[-16:]:
+            for message in self._log[-16:]:
                 print message
+            print time.strftime("%H:%M:%S", time.gmtime())
+
+    def log(self, msg):
+        self._log.append("%s %s" % (time.strftime("%H:%M:%S", time.gmtime()), msg))
+            
 
 
 
