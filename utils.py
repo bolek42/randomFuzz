@@ -1,8 +1,10 @@
 import glob
 from multiprocessing import Process,Queue,cpu_count
+from subprocess import Popen, PIPE, STDOUT
 import time
 import os
 import json
+from random import getrandbits
 
 #watchdog terminates processes after timeout
 #and delete left files
@@ -71,3 +73,31 @@ def save_data(fname, data):
 def load_json(fname):
     with open(fname, "r") as f:
         return json.loads(f.read())
+
+def callback_file(self, testcase, cmd, seed, postprocess_callback=None):
+    try:
+        seed = self.seed
+    except:
+        with open(seed, "r") as f:
+            seed = f.read()
+            self.seed = seed
+
+    m = self.mutator
+
+    data = m.mutate_seed(testcase["mutators"]["data"], seed)
+    if postprocess_callback:
+        data = postprocess_callback(data)
+
+    fname = hex(getrandbits(64))
+    with open( fname, "w") as f:
+        f.write(data)
+
+    cmd = (cmd % fname).split(" ")
+    p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
+    self.watchDog.start(p.pid, [fname])
+
+    stdout, stderr = p.communicate(input="")
+    crash, bitsets = parse_asan(p.pid, stderr)
+
+    return stderr, crash, bitsets
+

@@ -13,8 +13,8 @@ class mutator(seeds):
         self.mutations.append( self.byteflip)
         self.mutations.append( self.arith)
         self.mutations.append( self.arith_full)
-        #self.mutations.append( self.duplicate)
-        #self.mutations.append( self.delete)
+        self.mutations.append( self.duplicate)
+        self.mutations.append( self.delete)
         self.mutations.append( self.replace)
         self.mutations.append( self.insert)
 

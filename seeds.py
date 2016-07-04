@@ -99,11 +99,12 @@ class seeds:
             ret += string("\x00"*i)
         ret += string("\x00"*0x7f)
         ret += string("\x00"*0xff)
-        #ret += string("%n"*1024)
-        #ret += string("%n"*4095)
+        ret += string("%n"*1024)
+        ret += string("%n"*4095)
 
         for c in "\x00 !\"$%&/()=?,;.:-_#'+*<>|":
             ret += [c*16]
+
         #ret += self.pascal_string("%n"*0x7fff)
         #ret += self.c_string("%n"*0x7fff)
         return ret
