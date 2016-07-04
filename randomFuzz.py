@@ -64,10 +64,10 @@ class randomFuzz:
         self.initial_testcase["description"] = ""
 
     #TODO mutations
-    def add_mutator(self, name):
+    def add_mutator(self, name, length=42):
         mutator = {}
         mutator["mutations"] = []
-        mutator["len"] = 42 #XXX dirty fix for missing length
+        mutator["len"] = length #XXX dirty fix for missing length
         self.initial_testcase["mutators"][name] = mutator
         
     def launch(self):
@@ -182,7 +182,7 @@ class randomFuzz:
                         testcase["new_blocks"] = new_blocks
                         testcase["blocks"] = blocks
                         testcase["id"] = len(self.testcases)
-                        self.log("New Blocks: %d %s" % (new_blocks, testcase["description"]))
+                        self.log("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
                         save_json("testcases.json", self.testcases)
                         save_json("testcase-%d.json" % (len(self.testcases)),testcase)
                         self.testcases.append(testcase)

@@ -26,7 +26,7 @@ class TLSExtension(object):
 
         self.bytes = ""
         self.bytes += struct.pack(">H", self.extType)
-        self.bytes += struct.pack(">H", len(self.bytes))
+        self.bytes += struct.pack(">H", len(data))
         self.bytes += data
 
     def write(self):
@@ -61,35 +61,41 @@ class TLSConnection_mutator(TLSConnection):
 
 
     def send_hook(self, msg, randomizeFirstBlock=True):
-        #print ">>>", type(msg).__name__, msg.contentType, hexlify(msg.write())
+        name = type(msg).__name__
+        #print ">>>", type(msg).__name__, msg.contentType, len(msg.write()), hexlify(msg.write())
         data = msg.write()
 
         #mutate
-        if type(msg).__name__ in self.testcase["mutators"]:
-            mutator = self.testcase["mutators"][type(msg).__name__]
-            if type(msg).__name__ == "ClientHello":
-                #fuzzed extension
-                mutator = self.testcase["mutators"]["Extension"]
-                extdata = "\x00\x00" + "\x00"
-                extdata = self.mutator.mutate_seed(mutator, extdata)
-                extdata = "\x00" * max(0, 2 - len(extdata)) + extdata
-                extType = struct.unpack("<H", extdata[:2])[0]
-                ext = TLSExtension( extType, extdata[2:])
-                msg.addExtension(ext)
-                data = msg.write()
+        mutated = False
+        if name == "ClientHello" and "Extension" in self.testcase["mutators"]:
+            #fuzzed extension
+            mutator = self.testcase["mutators"]["Extension"]
+            extdata = "\x00\x00" + "\x00"
+            extdata = self.mutator.mutate_seed(mutator, extdata)
+            extdata = "\x00" * max(0, 2 - len(extdata)) + extdata
+            extType = struct.unpack("<H", extdata[:2])[0]
+            ext = TLSExtension( extType, extdata[2:])
+            msg.addExtension(ext)
+            data = msg.write()
+            mutated = True
 
-                mutator = self.testcase["mutators"]["ClientHello"]
-                data = self.mutator.mutate_seed(mutator, data)
+        if name == "ClientHello" and name in self.testcase["mutators"]:
+            mutator = self.testcase["mutators"][name]
+            data = self.mutator.mutate_seed(mutator, data)
+            mutated = True
 
 
-            #fuzz extension
-            if type(msg).__name__ == "TLSMessage":
-                data = chr(msg.contentType) + data
-                data = self.mutator.mutate_seed(mutator, data)
-                data = "\x00" * max(0, 1 - len(data)) + data
-                msg.contentType = ord(data[0])
-                data = data[1:]
+        #fuzz extension
+        if name == "TLSMessage" and name in self.testcase["mutators"]:
+            mutator = self.testcase["mutators"][name]
+            data = chr(msg.contentType) + data
+            data = self.mutator.mutate_seed(mutator, data)
+            data = "\x00" * max(0, 1 - len(data)) + data
+            msg.contentType = ord(data[0])
+            data = data[1:]
+            mutated = True
 
+        if mutated:
             #print "Mut", type(msg).__name__, msg.contentType, hexlify(data)
             msg.write = lambda: data
 
@@ -99,8 +105,9 @@ class TLSConnection_mutator(TLSConnection):
         records = self._getMsg_orig(expectedType, secondaryType, constructorType)
 
         for x in records:
-            #print "<<<", type(x).__name__, x.contentType, hexlify(x.write())
-            yield x
+            #print "<<<", type(x).__name__, x.contentType, len(x.write()), hexlify(x.write())
+            if x.contentType == expectedType:
+                yield x
 
 #  __               
 # / _|_   _ ________
@@ -132,10 +139,12 @@ def fuzzClient(mutator, testcase, port=31337):
         connection = TLSConnection_mutator(mutator, testcase, sock)
 
         connection.handshakeClientCert()
-        connection.send("asd\n")
 
-        msg = TLSMessage( 23, "B")
-        1 in connection._sendMsg(msg)
+        msg = TLSMessage( 21, "\x01\x00")
+        for x in connection._sendMsg(msg):
+            pass
+
+        connection.send("asd\n")
 
         connection.close()
         sock.close()
@@ -177,14 +186,15 @@ if __name__ == "__main__":
                         callback,
                         1337)
 
-    f.add_mutator("ClientHello")
-    f.add_mutator("Extension")
+    #f.add_mutator("ClientHello", 71)
+    f.add_mutator("Extension", 3)
     #f.add_mutator("ClientKeyExchange")
     #f.add_mutator("ChangeCipherSpec")
     #f.add_mutator("Finished")
     #f.add_mutator("ApplicationData")
-    f.add_mutator("TLSMessage")
+    f.add_mutator("TLSMessage", 3)
 
+    #f.initial_testcase = f.mutator.get_random_mutations(f.initial_testcase)
     #callback(f, f.initial_testcase)
     #sys.exit(1)
 

@@ -13,8 +13,8 @@ class mutator(seeds):
         self.mutations.append( self.byteflip)
         self.mutations.append( self.arith)
         self.mutations.append( self.arith_full)
-        self.mutations.append( self.duplicate)
-        self.mutations.append( self.delete)
+        #self.mutations.append( self.duplicate)
+        #self.mutations.append( self.delete)
         self.mutations.append( self.replace)
         self.mutations.append( self.insert)
 
@@ -22,14 +22,17 @@ class mutator(seeds):
 
 
     def mutate_seed(self, mutator, data):
+        mut = []
         for state in  mutator["mutations"]:
             m = state["mutation"]
             try:
                 data = self.mutations[m](state, data=data)
+                mut += [state]
             except:
                 #import traceback; traceback.print_exc()
                 pass
         mutator["len"] = len(data)
+        mutator["mutations"] = mut
         return data
 
     def iterate(self, mutator, offset, init=True, init_mutations=2):
@@ -54,8 +57,11 @@ class mutator(seeds):
         mutator["mutation"] = "done"
         return None, None
 
-    def get_random_mutations(self, mutator, maximum=4):
-        mutator = deepcopy(mutator)
+    def get_random_mutations(self, testcase, maximum=4):
+        mutated = deepcopy(testcase)
+        name = choice(mutated["mutators"].keys())
+        mutator = mutated["mutators"][name]
+
         if len(self.mutation_cache) == 0:
             print "build cache"
             for m in xrange(len(self.mutations)):
@@ -68,16 +74,19 @@ class mutator(seeds):
                     if n is None:
                         break
                     self.mutation_cache[m] += [deepcopy(mutator["state"])]
+            del mutator["state"]
 
         for i in xrange(randrange(maximum)+1):
             m = randrange(len(self.mutations))
-            state = choice(self.mutation_cache[m])
+            state = deepcopy(choice(self.mutation_cache[m]))
             state["offset"] = randrange(max(1, mutator["len"]-4))
             mutator["mutations"] += [state]
             mutator["state"] = state
             mutator["description"] = state["description"]
 
-        return mutator
+        mutated["mutators"][name] = mutator
+        mutated["description"] = "%s" % (name)
+        return mutated
                 
 
     #     _        _             

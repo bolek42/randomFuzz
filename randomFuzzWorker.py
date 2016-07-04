@@ -191,11 +191,8 @@ class randomFuzzWorker():
             mutated = deepcopy(testcase)
 
             #mutate
-            name = choice(mutated["mutators"].keys())
-            mutator = mutated["mutators"][name]
-            mutated["mutators"][name] = self.mutator.get_random_mutations( mutator ,maximum=8)
+            mutated = self.mutator.get_random_mutations( testcase ,maximum=4)
             mutated["parent_id"] = tid
-            mutated["description"] = "%s" % (name)
             yield mutated
 
     #to mutator

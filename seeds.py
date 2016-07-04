@@ -95,8 +95,10 @@ class seeds:
             return self.pascal_string(s) + self.c_string(s)
         ret = []
         ret += string("%n"*16)
-        ret += string("B"*0x7f)
-        ret += string("B"*0xff)
+        for i in xrange(64):
+            ret += string("\x00"*i)
+        ret += string("\x00"*0x7f)
+        ret += string("\x00"*0xff)
         #ret += string("%n"*1024)
         #ret += string("%n"*4095)
 
@@ -109,21 +111,13 @@ class seeds:
     def pascal_string(self, s):
         ret = []
         l = len(s)
-        ret += [struct.pack('<I',(l+16)&0xffffffff)+s]
         ret += [struct.pack('<I',(l)&0xffffffff)+s]
-        ret += [struct.pack('<I',(l-16)&0xffffffff)+s]
-        ret += [struct.pack('>I',(l+16)&0xffffffff)+s]
         ret += [struct.pack('>I',(l)&0xffffffff)+s]
-        ret += [struct.pack('>I',(l-16)&0xffffffff)+s]
-        ret += [struct.pack('<H',(l+16)&0xffff)+s]
         ret += [struct.pack('<H',(l)&0xffff)+s]
-        ret += [struct.pack('<H',(l-16)&0xffff)+s]
-        ret += [struct.pack('>H',(l+16)&0xffff)+s]
         ret += [struct.pack('>H',(l)&0xffff)+s]
-        ret += [struct.pack('>H',(l-16)&0xffff)+s]
-        ret += [struct.pack('B',(l+16)&0xff)+s]
+        ret += [struct.pack('<H',(l)&0xffff)+"\x00"+s]#24bit
+        ret += ["\x00"+struct.pack('>H',(l)&0xffff)+s]#24bit
         ret += [struct.pack('B',(l)&0xff)+s]
-        ret += [struct.pack('B',(l-16)&0xff)+s]
         return ret
 
     def c_string(self, s):
