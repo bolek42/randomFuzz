@@ -44,6 +44,8 @@ class randomFuzzWorker():
     def provision(self):
         print "connecting"
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10*1024*1024)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10*1024*1024)
         s.settimeout(10)
         s.connect((self.ip, self.port))
         self.sock = s

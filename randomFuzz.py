@@ -106,6 +106,8 @@ class randomFuzz:
     def accept(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10*1024*1024)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10*1024*1024)
         s.bind(("0.0.0.0", self.port))
         s.listen(1)
         s.setblocking(1)
@@ -183,9 +185,9 @@ class randomFuzz:
                         testcase["blocks"] = blocks
                         testcase["id"] = len(self.testcases)
                         self.log("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
-                        save_json("testcases.json", self.testcases)
                         save_json("testcase-%d.json" % (len(self.testcases)),testcase)
                         self.testcases.append(testcase)
+                        save_json("testcases.json", self.testcases)
 
                 for testcase in report["crash_report"]:
                     crash = testcase["crash"]
