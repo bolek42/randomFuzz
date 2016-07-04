@@ -32,7 +32,7 @@ class watchDog:
                 pass
             for fname in files:
                 try:
-                    os.remove(sname)
+                    os.remove(fname)
                 except:
                     pass
 

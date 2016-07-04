@@ -76,6 +76,7 @@ class mutator(seeds):
                     self.mutation_cache[m] += [deepcopy(mutator["state"])]
             del mutator["state"]
 
+        description = ""
         for i in xrange(randrange(maximum)+1):
             m = randrange(len(self.mutations))
             state = deepcopy(choice(self.mutation_cache[m]))
@@ -83,9 +84,10 @@ class mutator(seeds):
             mutator["mutations"] += [state]
             mutator["state"] = state
             mutator["description"] = state["description"]
+            description += state["description"] + "; "
 
         mutated["mutators"][name] = mutator
-        mutated["description"] = "%s" % (name)
+        mutated["description"] = "%s: %s" % (name, description[:-2])
         return mutated
                 
 
