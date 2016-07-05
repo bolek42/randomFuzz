@@ -27,6 +27,7 @@ class randomFuzzWorker():
 
         self.bitsets = {}
         self.testcases = []
+        self.active = []
         self.executed_testcases = Value('i', 0)
 
         self.watchDog = watchDog()
@@ -35,7 +36,6 @@ class randomFuzzWorker():
         self.update_queues = []
 
         self.testcase_report = Queue()
-        self.crash_report = Queue()
 
         self.provision()
         self.run()
@@ -46,7 +46,7 @@ class randomFuzzWorker():
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10*1024*1024)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10*1024*1024)
-        s.settimeout(10)
+        s.settimeout(100)
         s.connect((self.ip, self.port))
         self.sock = s
 
@@ -60,7 +60,9 @@ class randomFuzzWorker():
 
         #generic
         self.testcases += provision["testcases"]
+        self.bitsets = provision["bitsets"]
         self.crash_addr = provision["crash_addr"]
+        self.active = provision["active"]
         self.mutator = mutator(provision["seeds"])
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
@@ -75,7 +77,7 @@ class randomFuzzWorker():
             f.write( b64decode(data))
             f.close()
             os.chmod(fname, 0700)
-
+                        
         #cleanup
         del provision
         print "privision done"
@@ -97,9 +99,16 @@ class randomFuzzWorker():
             while len(d) < n:
                 d += sock.recv(n-len(d))
             update = json.loads(d)
-            print "Got %d new Testcases" % len(update["testcase_update"])
+            self.apply_update(update)
             for queue in self.update_queues:
                 queue.put(update)
+            if len(update["testcase_update"]) > 0:
+                print "Got %d new Testcases %d Total; Coverage:" % (len(update["testcase_update"]), len(self.testcases)),
+                for s in self.bitsets:
+                    covered = bin(self.bitsets[s]).count("1")
+                    missing = bin(~self.bitsets[s]).count("0")
+                    print "%s: %d" % (s,covered),
+                print "\n",
 
             #report
             report = {}
@@ -108,11 +117,6 @@ class randomFuzzWorker():
                 t = self.testcase_report.get()
                 report["testcase_report"].append(t)
 
-            report["crash_report"] = []
-            while self.crash_report.qsize() > 0:
-                t = self.crash_report.get()
-                report["crash_report"].append(t)
-
             report["executed_testcases"] = self.executed_testcases.value
             self.executed_testcases.value = 0
                 
@@ -120,6 +124,14 @@ class randomFuzzWorker():
             sock.send(struct.pack('<I',len(data)))
             sock.send(data)
 
+    def apply_update(self, update):
+        self.testcases += update["testcase_update"]
+
+        for s,bitset in update["bitset_update"].iteritems():
+            self.bitsets[s] = bitset
+
+        self.crash_addr = update["crash_addr"]
+        self.active = update["active"]
 
     #execute testcases and process results
     def worker(self, worker_id):
@@ -128,12 +140,7 @@ class randomFuzzWorker():
             #apply updates
             if self.update_queues[worker_id].qsize() > 0:
                 update = self.update_queues[worker_id].get()
-                self.testcases += update["testcase_update"]
-
-                for s,bitset in update["bitset_update"].iteritems():
-                    self.bitsets[s] = bitset
-
-                self.crash_addr = update["crash_addr"]
+                self.apply_update(update)
 
 
             #initial and deterministic testcases
@@ -172,7 +179,7 @@ class randomFuzzWorker():
         testcase["bitsets"] = bitsets
 
         if new_blocks > 0:
-            print "New blocks: %d, tid: %d description: %s" % (new_blocks, testcase["id"], testcase["description"])
+            print "New blocks: %d, tid: %d Description: %s" % (new_blocks, testcase["id"], testcase["description"])
             self.testcase_report.put(testcase)
 
         #detect new crash
@@ -180,11 +187,13 @@ class randomFuzzWorker():
             print "New crash %s" % crash
             testcase["crash"] = crash
             testcase["stderr"] = stderr
-            self.crash_report.put(testcase)
+            self.testcase_report.put(testcase)
 
     #genetic methods
     def get_testcases(self):
         for tid in xrange(len(self.testcases)):
+            if tid not in self.active:
+                continue
             merged = self.random_merge(tid)
             if merged:
                 yield merged
@@ -200,7 +209,7 @@ class randomFuzzWorker():
     #to mutator
     def random_merge(self, tid1):
         try:
-            tid2 = randrange(len(self.testcases))
+            tid2 = choice(self.active)
             if tid1 != tid2:
                 mutated = deepcopy(self.testcases[tid1])
                 name = choice(mutated["mutators"].keys())
@@ -210,7 +219,7 @@ class randomFuzzWorker():
                 l2 = randrange(len(mutator2["mutations"])) if len(mutator2["mutations"]) > 0 else 0
                 mutator1["mutations"] = mutator1["mutations"][:l1] + mutator2["mutations"][:l2]
                 mutated["mutators"][name] = mutator1
-                mutated["description"] = "radnom merge %d-%d" % (tid1,tid2)
+                mutated["description"] = "%s radnom merge %d-%d" % (name, tid1,tid2)
                 mutated["parent_id"] = tid1
                 return mutated
         except:
@@ -236,3 +245,4 @@ if __name__ == "__main__":
         except:
             import traceback; traceback.print_exc()
             os.kill(os.getpid(), 9)
+t

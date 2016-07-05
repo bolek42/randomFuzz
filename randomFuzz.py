@@ -22,16 +22,14 @@ from base64 import b64encode, b64decode
 import struct
 import cloud
 from shutil import copy2
-import glob
 from utils import *
 from mutator import mutator
-
-
 
 class randomFuzz:
     def __init__(self, files, workdir, seeds, callback, port=1337):
         #fuzzing state
         self.testcases = []
+        self.active = []
         self.callback = callback
         self.watchDog = watchDog()
         self.mutator = mutator(seeds)
@@ -40,6 +38,8 @@ class randomFuzz:
         self.port = port
         self.bitsets = {}
         self.initial_testcases = Queue()
+        self.report_queue = Queue()
+        self.update_queue = Queue()
 
         #copy file to workdir
         self.files = []
@@ -79,9 +79,10 @@ class randomFuzz:
             pass
             import traceback; traceback.print_exc()
 
-
         #start listener
         Thread(target=self.ui).start()
+        Thread(target=self.apply_update).start()
+        Process(target=self.process_report).start()
 
         try:
             self.accept()
@@ -94,13 +95,13 @@ class randomFuzz:
     def restore_state(self):
         try:
             testcases = load_json("testcases.json")
+            self.testcases = testcases
             self.log("Loaded %d testcases" % len(testcases))
-            for testcase in testcases:
-                self.initial_testcases.put(testcase)
+            self.bitsets = load_json("bitsets.json")
             self.crash_addr = load_json("crash_addr.json")
+            self.active = load_json("active.json")
         except:
             pass
-
 
     #network
     def accept(self):
@@ -108,6 +109,7 @@ class randomFuzz:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10*1024*1024)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10*1024*1024)
+        s.settimeout(100)
         s.bind(("0.0.0.0", self.port))
         s.listen(1)
         s.setblocking(1)
@@ -120,7 +122,9 @@ class randomFuzz:
         provision = {}
         provision["seeds"] = self.seeds
         provision["testcases"] = self.testcases
+        provision["bitsets"] = self.bitsets
         provision["crash_addr"] = self.crash_addr
+        provision["active"] = self.active + [0]
         provision["callback"] = b64encode(cloud.serialization.cloudpickle.dumps(self.callback))
 
         provision["initial_testcases"] = []
@@ -154,6 +158,7 @@ class randomFuzz:
                     update["bitset_update"] = self.bitsets
 
                 update["crash_addr"] = self.crash_addr
+                update["active"] = self.active
 
                 s = json.dumps(update)
                 conn.send(struct.pack('<I',len(s)))
@@ -167,37 +172,9 @@ class randomFuzz:
                 report = json.loads(d)
                 self.total_testcases += report["executed_testcases"]
 
-                #process testcase update
-                for testcase in report["testcase_report"] + report["crash_report"]:
-                    bitsets = testcase["bitsets"]
+                for testcase in report["testcase_report"]:
+                    self.report_queue.put(testcase)
 
-                    for s in bitsets:
-                        if s not in self.bitsets: self.bitsets[s] = 0
-                    new_blocks = 0
-                    blocks = 0
-                    for s in bitsets:
-                        bitset = int(bitsets[s])
-                        blocks += bin(bitset).count("1")
-                        new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
-                        self.bitsets[s] |= bitset
-                    if new_blocks > 0:
-                        testcase["new_blocks"] = new_blocks
-                        testcase["blocks"] = blocks
-                        testcase["id"] = len(self.testcases)
-                        self.log("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
-                        save_json("testcase-%d.json" % (len(self.testcases)),testcase)
-                        self.testcases.append(testcase)
-                        save_json("testcases.json", self.testcases)
-
-                for testcase in report["crash_report"]:
-                    crash = testcase["crash"]
-                    if crash not in self.crash_addr:
-                        self.log("New Crash @ %s !!" % (crash))
-                        save_json("crash_addr.json", self.crash_addr)
-                        save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
-                        save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
-
-                        self.crash_addr += [crash]
 
                 time.sleep(1)
 
@@ -205,6 +182,84 @@ class randomFuzz:
             import traceback; traceback.print_exc()
             conn.close()
             return
+
+    def apply_update(self):
+        while True:
+            testcase, bitsets, crash_addr, active, log = self.update_queue.get()
+            self.testcases.append(testcase)
+            self.bitsets = bitsets
+            self.crash_addr = crash_addr
+            self.active = active
+            for l in log:
+                self.log(l)
+
+    def process_report(self):
+        print "update processor started"
+        updated = 0
+        while True:
+            testcase = self.report_queue.get()
+            log = []
+
+            #update bitsets if not crashed
+            if "bitsets" in testcase:
+                bitsets = testcase["bitsets"]
+
+                for s in bitsets:
+                    if s not in self.bitsets: self.bitsets[s] = 0
+                new_blocks = 0
+                blocks = 0
+                for s in bitsets:
+                    bitset = int(bitsets[s])
+                    blocks += bin(bitset).count("1")
+                    new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
+                    self.bitsets[s] |= bitset
+
+                if new_blocks > 0:
+                    updated += 1
+                    testcase["new_blocks"] = new_blocks
+                    testcase["blocks"] = blocks
+                    testcase["id"] = len(self.testcases)
+                    log.append("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
+                    save_json("testcase-%d.json" % (len(self.testcases)),testcase)
+                    self.active.append(len(self.testcases))
+                    self.testcases.append(testcase)
+                    save_json("testcases.json", self.testcases)
+                    save_json("bitsets.json", self.bitsets)
+
+            #handle new crash
+            if "crash" in testcase:
+                crash = testcase["crash"]
+                if crash not in self.crash_addr:
+                    log.append("New Crash @ %s !!" % (crash))
+                    save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
+                    save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
+                    self.crash_addr += [crash]
+                    save_json("crash_addr.json", self.crash_addr)
+
+            
+            #set testcases to inactive, if there is an other testcase,
+            #that covers all blocks and more
+            if self.report_queue.qsize() == 0 and updated > 20:
+                updated = 0
+                active_old = self.active
+                self.active = []
+                for tid1 in active_old:
+                    active = True
+                    for tid2 in active_old:
+                        if tid1 != tid2:
+                            for s in self.testcases[tid1]["bitsets"]:
+                                b1 = self.testcases[tid1]["bitsets"][s]
+                                b2 = self.testcases[tid2]["bitsets"][s]
+                                if bin(b2).count("1") > bin(b1).count("1") and bin((~b2)&b1).count("1") == 0:
+                                    #print "%d is subset of %d" % (tid1, tid2)
+                                    active = False
+                                    break
+
+                    if active:
+                        self.active += [tid1]
+                save_json("active.json", self.active)
+
+            self.update_queue.put( (testcase, self.bitsets, self.crash_addr, self.active, log))
     
     #ui
     def ui(self):
@@ -226,6 +281,8 @@ class randomFuzz:
             print "Rate: %.2f/s" % self.rate
             print "Total testcases: %d" % self.total_testcases
             print "Crash: %d" % len(self.crash_addr)
+            print "Report Queue: %d" % self.report_queue.qsize()
+            print "Active Testcases: %d" % len(self.active)
             t = time.time() - self.t0
             print "Time: %dd %dh %dm %ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"

@@ -5,6 +5,7 @@ import time
 import os
 import json
 from random import getrandbits
+import re
 
 #watchdog terminates processes after timeout
 #and delete left files
@@ -42,6 +43,7 @@ def parse_asan(pid, stderr):
     for sname in glob.glob("*.%d.bitset-sancov" % (pid)):
         f = open(sname)
         bitsets[".".join(sname.split(".")[:-2])] = int("1"+f.read(),2)
+        f.close()
         os.remove(sname)
 
     for sname in glob.glob("*.%d.sancov" % (pid)):
@@ -49,17 +51,10 @@ def parse_asan(pid, stderr):
 
     # log crash
     crash = False
-    if "ERROR: AddressSanitizer: heap-buffer-overflow" in stderr:
+    if "ERROR: AddressSanitizer:" in stderr:
         errorline = re.findall( "ERROR\: AddressSanitizer: .*", stderr)[0]
-        crash = re.findall("0x[0-9a-f]*", errorline)[1]
-    elif "ERROR: AddressSanitizer: attempting free on address which was not malloc()-ed:" in stderr:
-        errorline = re.findall( "ERROR\: AddressSanitizer: .*", stderr)[0]
-        crash = re.findall("0x[0-9a-f]*", errorline)[0]
-    elif "ERROR: AddressSanitizer:" in stderr:
-        crash = "0x424242"
+        crash = re.findall("pc 0x[0-9a-f]*", errorline)[0][3:]
 
-    if crash:
-        print "Crash: " + crash
     return crash, bitsets
 
 def save_json(fname, data):

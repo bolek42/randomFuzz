@@ -70,7 +70,7 @@ def pngimage_callback(self, testcase):
 #["./pngimage --test-all %s"],#, "pngcheck %s", "convert %s -thumbnail 10x10 ./null.jpg"],
 
 f = randomFuzz(     ["teststuff/libpng/pngimage", "teststuff/libpng/libpng12.so.0", "teststuff/libpng/seed-1.png"],
-                    "teststuff/pngimage-work", 
+                    "teststuff/fuzz/pngimage", 
                     seeds(),
                     pngimage_callback)
 f.add_mutator("data")
