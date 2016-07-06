@@ -14,16 +14,18 @@ import glob
 from mutator import mutator
 from utils import *
 from copy import deepcopy
+from shutil import copy2
 
 
 class randomFuzzWorker():
-    def __init__(self, ip, port, n_threads=0):
+    def __init__(self, ip, port, workdir, n_threads=0):
         os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1"
         os.environ["MALLOC_CHECK_"]="0"
         os.environ["LD_LIBRARY_PATH"]="."
 
         self.ip = ip
         self.port = port
+        self.workdir = workdir
 
         self.bitsets = {}
         self.testcases = []
@@ -66,18 +68,18 @@ class randomFuzzWorker():
         self.mutator = mutator(provision["seeds"])
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
+        #write Files to Disk
+        for fname in provision["files"]:
+            copy2(fname, self.workdir)
+            os.chmod(fname, 0700)
+
+        os.chdir(self.workdir)
+
         #fetch initial testcases
         print "Got %d initial testcases" % len(provision["initial_testcases"])
         for testcase in provision["initial_testcases"]:
             self.work_queue.put(testcase)
 
-        #write Files to Disk
-        for fname,data in provision["files"].iteritems():
-            f = open(fname, "wb")
-            f.write( b64decode(data))
-            f.close()
-            os.chmod(fname, 0700)
-                        
         #cleanup
         del provision
         print "privision done"
@@ -113,7 +115,7 @@ class randomFuzzWorker():
             #report
             report = {}
             report["testcase_report"] = []
-            while self.testcase_report.qsize() > 0:
+            while self.testcase_report.qsize() > 0 and len(report["testcase_report"]) < 10:
                 t = self.testcase_report.get()
                 report["testcase_report"].append(t)
 
@@ -137,11 +139,6 @@ class randomFuzzWorker():
     def worker(self, worker_id):
         print "worker started"
         while True:
-            #apply updates
-            if self.update_queues[worker_id].qsize() > 0:
-                update = self.update_queues[worker_id].get()
-                self.apply_update(update)
-
 
             #initial and deterministic testcases
             while self.work_queue.qsize() > 0:
@@ -151,6 +148,11 @@ class randomFuzzWorker():
 
             #randomly mutate testcases
             for mutated in self.get_testcases():
+                #apply updates
+                if self.update_queues[worker_id].qsize() > 0:
+                    update = self.update_queues[worker_id].get()
+                    self.apply_update(update)
+
                 self.execute_testcase(mutated)
 
     def execute_testcase(self, testcase):
@@ -194,12 +196,12 @@ class randomFuzzWorker():
         for tid in xrange(len(self.testcases)):
             if tid not in self.active:
                 continue
+
             merged = self.random_merge(tid)
             if merged:
                 yield merged
             #get
             testcase = self.testcases[tid]
-            mutated = deepcopy(testcase)
 
             #mutate
             mutated = self.mutator.get_random_mutations( testcase ,maximum=4)
@@ -223,13 +225,12 @@ class randomFuzzWorker():
                 mutated["parent_id"] = tid1
                 return mutated
         except:
-            import traceback; traceback.print_exc()
+            #import traceback; traceback.print_exc()
             pass
 
 
 if __name__ == "__main__":
     import time
-    os.chdir("teststuff/work")
     if len(sys.argv) == 4:
         n_threads = int(sys.argv[3])
     else:
@@ -237,7 +238,7 @@ if __name__ == "__main__":
 
     while True:
         try:
-            randomFuzzWorker(sys.argv[1],int(sys.argv[2]), n_threads)
+            randomFuzzWorker(sys.argv[1],int(sys.argv[2]), "teststuff/work", n_threads)
             time.sleep(1)
         except KeyboardInterrupt:
             import traceback; traceback.print_exc()

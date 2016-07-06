@@ -33,6 +33,7 @@ class randomFuzz:
         self.callback = callback
         self.watchDog = watchDog()
         self.mutator = mutator(seeds)
+        self.workdir = workdir
 
         self.seeds = seeds
         self.port = port
@@ -41,12 +42,16 @@ class randomFuzz:
         self.report_queue = Queue()
         self.update_queue = Queue()
 
+        #create workdir
+        if not os.path.exists(workdir):
+            os.makedirs(workdir)
+
         #copy file to workdir
         self.files = []
         for fname in files:
             copy2(fname, workdir)
             os.chmod(fname, 0700)
-            self.files.append(os.path.basename(fname))
+            self.files.append(fname)
         os.chdir(workdir)
 
         self.crash_addr = [] #addresses of crashes
@@ -94,14 +99,23 @@ class randomFuzz:
 
     def restore_state(self):
         try:
-            testcases = load_json("testcases.json")
-            self.testcases = testcases
-            self.log("Loaded %d testcases" % len(testcases))
+            self.testcases = []
+            i = 0
+            while True:
+                try:
+                    t = load_json("testcase-%d.json" % i)
+                    self.testcases.append(t)
+                    i += 1
+                except:
+                    break
+            self.log("Loaded %d testcases" % len(self.testcases))
             self.bitsets = load_json("bitsets.json")
             self.crash_addr = load_json("crash_addr.json")
             self.active = load_json("active.json")
         except:
             pass
+        if len(self.active) == 0:
+            self.get_active()
 
     #network
     def accept(self):
@@ -124,7 +138,7 @@ class randomFuzz:
         provision["testcases"] = self.testcases
         provision["bitsets"] = self.bitsets
         provision["crash_addr"] = self.crash_addr
-        provision["active"] = self.active + [0]
+        provision["active"] = self.active
         provision["callback"] = b64encode(cloud.serialization.cloudpickle.dumps(self.callback))
 
         provision["initial_testcases"] = []
@@ -132,11 +146,9 @@ class randomFuzz:
             testcase = self.initial_testcases.get()
             provision["initial_testcases"].append(testcase)
 
-        provision["files"] = {}
+        provision["files"] = []
         for fname in self.files:
-            data = open(fname,"rb").read()
-            fname = fname.split("/")[-1]
-            provision["files"][fname] = b64encode(data)
+            provision["files"].append(fname)
 
         s = json.dumps(provision)
         last_tid = len(self.testcases)
@@ -174,7 +186,6 @@ class randomFuzz:
 
                 for testcase in report["testcase_report"]:
                     self.report_queue.put(testcase)
-
 
                 time.sleep(1)
 
@@ -223,7 +234,6 @@ class randomFuzz:
                     save_json("testcase-%d.json" % (len(self.testcases)),testcase)
                     self.active.append(len(self.testcases))
                     self.testcases.append(testcase)
-                    save_json("testcases.json", self.testcases)
                     save_json("bitsets.json", self.bitsets)
 
             #handle new crash
@@ -233,33 +243,48 @@ class randomFuzz:
                     log.append("New Crash @ %s !!" % (crash))
                     save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
                     save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
+
+                    #notify
+                    cmd = "(echo \"Subject: Crash %s @ %s!!\" ; cat crash-%d.stderr) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.workdir), crash, len(self.crash_addr))
+                    os.system(cmd)
+
                     self.crash_addr += [crash]
                     save_json("crash_addr.json", self.crash_addr)
 
+            if new_blocks > 0 or "crash" in testcase:
+                self.update_queue.put( (testcase, self.bitsets, self.crash_addr, self.active, log))
             
-            #set testcases to inactive, if there is an other testcase,
-            #that covers all blocks and more
             if self.report_queue.qsize() == 0 and updated > 20:
-                updated = 0
-                active_old = self.active
-                self.active = []
-                for tid1 in active_old:
-                    active = True
-                    for tid2 in active_old:
-                        if tid1 != tid2:
-                            for s in self.testcases[tid1]["bitsets"]:
-                                b1 = self.testcases[tid1]["bitsets"][s]
-                                b2 = self.testcases[tid2]["bitsets"][s]
-                                if bin(b2).count("1") > bin(b1).count("1") and bin((~b2)&b1).count("1") == 0:
-                                    #print "%d is subset of %d" % (tid1, tid2)
-                                    active = False
-                                    break
+                self.get_active()
+                updated = -self.report_queue.qsize()
 
-                    if active:
-                        self.active += [tid1]
-                save_json("active.json", self.active)
 
-            self.update_queue.put( (testcase, self.bitsets, self.crash_addr, self.active, log))
+    #set testcases to inactive, if there is an other testcase,
+    #that covers all blocks and more
+    def get_active(self):
+        if len(self.testcases) < 500:
+            if len(self.active) == 0:
+                self.active = range(len(self.testcases))
+            active_old = self.active
+            self.active = []
+            for tid1 in active_old:
+                active = True
+                for tid2 in active_old:
+                    if tid1 != tid2:
+                        for s in self.testcases[tid1]["bitsets"]:
+                            b1 = self.testcases[tid1]["bitsets"][s]
+                            b2 = self.testcases[tid2]["bitsets"][s]
+                            if bin(b2).count("1") > bin(b1).count("1") and bin((~b2)&b1).count("1") == 0:
+                                #print "%d is subset of %d" % (tid1, tid2)
+                                active = False
+                                break
+
+                if active:
+                    self.active += [tid1]
+        else:
+            self.active = range(len(self.testcases)-200,len(self.testcases))
+        save_json("active.json", self.active)
+
     
     #ui
     def ui(self):

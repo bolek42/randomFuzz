@@ -88,6 +88,12 @@ class mutator(seeds):
 
         mutated["mutators"][name] = mutator
         mutated["description"] = "%s: %s" % (name, description[:-2])
+        for name2 in mutated["mutators"]:
+            if name == name2:
+                mutated["mutators"][name2]["altered"] = True
+            else:
+                mutated["mutators"][name2]["altered"] = False
+
         return mutated
                 
 

@@ -52,8 +52,11 @@ def parse_asan(pid, stderr):
     # log crash
     crash = False
     if "ERROR: AddressSanitizer:" in stderr:
-        errorline = re.findall( "ERROR\: AddressSanitizer: .*", stderr)[0]
-        crash = re.findall("pc 0x[0-9a-f]*", errorline)[0][3:]
+        try:
+            errorline = re.findall( "ERROR\: AddressSanitizer: .*", stderr)[0]
+            crash = re.findall("pc 0x[0-9a-f]*", errorline)[0][3:]
+        except:
+            crash = "0x42424242"
 
     return crash, bitsets
 
