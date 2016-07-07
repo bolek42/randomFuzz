@@ -301,7 +301,7 @@ class randomFuzz:
 
             #print stuff
             print "\x1b[0;0H"+"\x1b[2J"+"\r", 
-            print "-=randomFuzz=-"
+            print "-=randomFuzz @ %d=-" % self.port
             print "Testcases: %d" % (len(self.testcases))
             print "Rate: %.2f/s" % self.rate
             print "Total testcases: %d" % self.total_testcases
