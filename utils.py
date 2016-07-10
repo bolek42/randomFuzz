@@ -28,7 +28,7 @@ class watchDog:
             time.sleep(max(0,t+timeout-t2))
             try:
                 os.kill(pid, 9)
-                print "%d Hung" % pid
+                #print "%d Hung" % pid
             except:
                 pass
             for fname in files:
@@ -72,7 +72,7 @@ def load_json(fname):
     with open(fname, "r") as f:
         return json.loads(f.read())
 
-def callback_file(self, testcase, cmd, seed, postprocess_callback=None):
+def callback_file(self, testcase, cmd, seed, postprocess_callback=None, dumpfile=None):
     try:
         seed = self.seed
     except:
@@ -89,6 +89,10 @@ def callback_file(self, testcase, cmd, seed, postprocess_callback=None):
     fname = hex(getrandbits(64))
     with open( fname, "w") as f:
         f.write(data)
+
+    if dumpfile:
+        with open( dumpfile, "w") as f:
+            f.write(data)
 
     cmd = (cmd % fname).split(" ")
     p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)

@@ -57,7 +57,7 @@ class mutator(seeds):
         mutator["mutation"] = "done"
         return None, None
 
-    def get_random_mutations(self, testcase, maximum=4):
+    def get_random_mutations(self, testcase, maximum=4, mutations=None, start=0, stop=0):
         mutated = deepcopy(testcase)
         name = choice(mutated["mutators"].keys())
         mutator = mutated["mutators"][name]
@@ -78,13 +78,20 @@ class mutator(seeds):
 
         description = ""
         for i in xrange(randrange(maximum)+1):
-            m = randrange(len(self.mutations))
+            if not mutations:
+                m = randrange(len(self.mutations))
+            else:
+                m = choice(mutations)
+
             state = deepcopy(choice(self.mutation_cache[m]))
-            state["offset"] = randrange(max(1, mutator["len"]-4))
+            if stop-start <= 0:
+                state["offset"] = randrange(max(1, mutator["len"]-4))
+            else:
+                state["offset"] = randrange(start, stop)
             mutator["mutations"] += [state]
             mutator["state"] = state
             mutator["description"] = state["description"]
-            description += state["description"] + "; "
+            description += ("offset=%d: " % state["offset"]) + state["description"] + "; "
 
         mutated["mutators"][name] = mutator
         mutated["description"] = "%s: %s" % (name, description[:-2])
@@ -219,7 +226,7 @@ class mutator(seeds):
         if f >= len(formats):
             return None
         state["arith-full"]["i"] = i + 1
-        return "arith-full %d,%d" % (f,i)
+        return "arith-full %s,%d" % (formats[f][0],i)
 
     def duplicate(self, state, data=None):
         if "duplicate" not in state:

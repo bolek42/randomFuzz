@@ -19,7 +19,7 @@ from shutil import copy2
 
 class randomFuzzWorker():
     def __init__(self, ip, port, workdir, n_threads=0):
-        os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1"
+        os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1:symbolize=1"
         os.environ["MALLOC_CHECK_"]="0"
         os.environ["LD_LIBRARY_PATH"]="."
 
@@ -48,7 +48,7 @@ class randomFuzzWorker():
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10*1024*1024)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10*1024*1024)
-        s.settimeout(100)
+        s.settimeout(100000)
         s.connect((self.ip, self.port))
         self.sock = s
 
@@ -139,7 +139,6 @@ class randomFuzzWorker():
     def worker(self, worker_id):
         print "worker started"
         while True:
-
             #initial and deterministic testcases
             while self.work_queue.qsize() > 0:
                     testcase = self.work_queue.get()
@@ -169,44 +168,93 @@ class randomFuzzWorker():
         for s in bitsets:
             if s not in self.bitsets: self.bitsets[s] = 0
 
-        #check for new edge
-        new_blocks = 0
-        blocks = 0
-        for s in bitsets:
-            bitset = int(bitsets[s])
-            blocks += bin(bitset).count("1")
-            new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
-            self.bitsets[s] |= bitset
-
         testcase["bitsets"] = bitsets
 
-        if new_blocks > 0:
-            print "New blocks: %d, tid: %d Description: %s" % (new_blocks, testcase["id"], testcase["description"])
-            self.testcase_report.put(testcase)
+        if "minimize" not in testcase:
+            #check for new edge
+            new_blocks = 0
+            blocks = 0
+            for s in bitsets:
+                bitset = int(bitsets[s])
+                blocks += bin(bitset).count("1")
+                new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
+                self.bitsets[s] |= bitset
 
-        #detect new crash
-        if crash and crash not in self.crash_addr:
-            print "New crash %s" % crash
-            testcase["crash"] = crash
-            testcase["stderr"] = stderr
-            self.testcase_report.put(testcase)
+            if new_blocks > 0:
+                print "Minimizing testcase: New blocks: %d, tid: %d Description: %s" % (new_blocks, testcase["id"], testcase["description"])
+                #remove unused mutations
+                minimize = {}
+                minimize["i"] = 0
+                minimize["reference"] = deepcopy(testcase)
+                testcase["minimize"] = minimize
+                self.work_queue.put(testcase)
+
+            #detect new crash
+            if crash and crash not in self.crash_addr:
+                print "New crash %s" % crash
+                testcase["crash"] = crash
+                testcase["stderr"] = stderr
+                self.testcase_report.put(testcase)
+
+        #remove unused mutations
+        else:
+            try:
+                i = testcase["minimize"]["i"]
+                reference = testcase["minimize"]["reference"]
+            except:
+                print testcase["minimize"]
+                import os; os.kill(os.getpid(), 9)
+
+            equal=True
+            for s in bitsets:
+                if bitsets[s] != reference["bitsets"][s]:
+                    equal = False
+
+            #done
+            if i >= len(testcase["mutators"]["data"]["mutations"]) - 1:
+                if equal:
+                    print "Minimizing Done", len(testcase["mutators"]["data"]["mutations"])
+                    del testcase["minimize"]
+                    self.testcase_report.put(testcase)
+                else:
+                    print "Minimizing Done", len(reference["mutators"]["data"]["mutations"])
+                    if "minimize" in  reference: del reference["minimize"]
+                    self.testcase_report.put(reference)
+                return
+
+            #mutation was unused
+            if equal:
+                #print "%d unused" % i
+                del testcase["minimize"]["reference"]
+                testcase["minimize"]["reference"] = deepcopy(testcase)
+                testcase["minimize"]["i"] = 0
+
+            else:
+                #print "%d used" % i
+                testcase["minimize"]["i"] = i+1
+
+            testcase["mutators"]["data"]["mutations"] = reference["mutators"]["data"]["mutations"][:i] + reference["mutators"]["data"]["mutations"][i+1:]
+
+            del testcase["bitsets"]
+            self.work_queue.put(testcase)
+
 
     #genetic methods
     def get_testcases(self):
-        for tid in xrange(len(self.testcases)):
-            if tid not in self.active:
-                continue
+        if len(self.testcases) == 0: return
+        tid = randrange(len(self.testcases))
 
-            merged = self.random_merge(tid)
-            if merged:
-                yield merged
-            #get
-            testcase = self.testcases[tid]
+        if tid not in self.active: return
 
-            #mutate
-            mutated = self.mutator.get_random_mutations( testcase ,maximum=4)
-            mutated["parent_id"] = tid
-            yield mutated
+        merged = self.random_merge(tid)
+        if merged: yield merged
+        #get
+        testcase = self.testcases[tid]
+
+        #mutate
+        mutated = self.mutator.get_random_mutations( testcase ,maximum=8)
+        mutated["parent_id"] = tid
+        yield mutated
 
     #to mutator
     def random_merge(self, tid1):
