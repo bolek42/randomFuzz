@@ -64,14 +64,17 @@ class randomFuzzWorker():
         self.testcases += provision["testcases"]
         self.bitsets = provision["bitsets"]
         self.crash_addr = provision["crash_addr"]
-        self.active = provision["active"]
+        self.active = provision["active"][-300:]
         self.mutator = mutator(provision["seeds"])
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
         #write Files to Disk
         for fname in provision["files"]:
-            copy2(fname, self.workdir)
-            os.chmod(fname, 0700)
+            try:
+                copy2(fname, self.workdir)
+                os.chmod(fname, 0700)
+            except:
+                import traceback; traceback.print_exc()
 
         os.chdir(self.workdir)
 
@@ -138,13 +141,10 @@ class randomFuzzWorker():
     #execute testcases and process results
     def worker(self, worker_id):
         print "worker started"
+        while self.work_queue.qsize() > 0:
+                testcase = self.work_queue.get()
+                self.execute_testcase(testcase)
         while True:
-            #initial and deterministic testcases
-            while self.work_queue.qsize() > 0:
-                    testcase = self.work_queue.get()
-                    self.execute_testcase(testcase)
-                    pass
-
             #randomly mutate testcases
             for mutated in self.get_testcases():
                 #apply updates
@@ -153,6 +153,8 @@ class randomFuzzWorker():
                     self.apply_update(update)
 
                 self.execute_testcase(mutated)
+
+
 
     def execute_testcase(self, testcase):
         self.executed_testcases.value += 1
@@ -170,6 +172,14 @@ class randomFuzzWorker():
 
         testcase["bitsets"] = bitsets
 
+        #detect new crash
+        if crash and crash not in self.crash_addr:
+            print "New crash %s" % crash
+            testcase["crash"] = crash
+            testcase["stderr"] = stderr
+            self.testcase_report.put(testcase)
+
+
         if "minimize" not in testcase:
             #check for new edge
             new_blocks = 0
@@ -181,20 +191,13 @@ class randomFuzzWorker():
                 self.bitsets[s] |= bitset
 
             if new_blocks > 0:
-                print "Minimizing testcase: New blocks: %d, tid: %d Description: %s" % (new_blocks, testcase["id"], testcase["description"])
                 #remove unused mutations
                 minimize = {}
                 minimize["i"] = 0
                 minimize["reference"] = deepcopy(testcase)
+                testcase["new_blocks"] = new_blocks
                 testcase["minimize"] = minimize
                 self.work_queue.put(testcase)
-
-            #detect new crash
-            if crash and crash not in self.crash_addr:
-                print "New crash %s" % crash
-                testcase["crash"] = crash
-                testcase["stderr"] = stderr
-                self.testcase_report.put(testcase)
 
         #remove unused mutations
         else:
@@ -206,18 +209,22 @@ class randomFuzzWorker():
                 import os; os.kill(os.getpid(), 9)
 
             equal=True
-            for s in bitsets:
-                if bitsets[s] != reference["bitsets"][s]:
-                    equal = False
+            if not crash:
+                for s in reference["bitsets"]:
+                    if bitsets[s] != reference["bitsets"][s]:
+                        equal = False
+            else:
+                equal = False
 
             #done
             if i >= len(testcase["mutators"]["data"]["mutations"]) - 1:
+                print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
                 if equal:
-                    print "Minimizing Done", len(testcase["mutators"]["data"]["mutations"])
+                    print "Mutations: %d" % len(testcase["mutators"]["data"]["mutations"])
                     del testcase["minimize"]
                     self.testcase_report.put(testcase)
                 else:
-                    print "Minimizing Done", len(reference["mutators"]["data"]["mutations"])
+                    print "Mutations: %d" % len(reference["mutators"]["data"]["mutations"])
                     if "minimize" in  reference: del reference["minimize"]
                     self.testcase_report.put(reference)
                 return
@@ -227,7 +234,7 @@ class randomFuzzWorker():
                 #print "%d unused" % i
                 del testcase["minimize"]["reference"]
                 testcase["minimize"]["reference"] = deepcopy(testcase)
-                testcase["minimize"]["i"] = 0
+                testcase["minimize"]["i"] = i
 
             else:
                 #print "%d used" % i
@@ -241,20 +248,29 @@ class randomFuzzWorker():
 
     #genetic methods
     def get_testcases(self):
-        if len(self.testcases) == 0: return
-        tid = randrange(len(self.testcases))
+        while True:
+            #initial and deterministic testcases
+            try:
+                testcase = self.work_queue.get(False)
+                yield testcase
+            except:
+                pass
 
-        if tid not in self.active: return
+            #choose
+            if len(self.testcases) == 0: return
+            while True:
+                tid = randrange(len(self.testcases))
+                if tid in self.active: break
 
-        merged = self.random_merge(tid)
-        if merged: yield merged
-        #get
-        testcase = self.testcases[tid]
+            merged = self.random_merge(tid)
+            if merged: yield merged
+            #get
+            testcase = self.testcases[tid]
 
-        #mutate
-        mutated = self.mutator.get_random_mutations( testcase ,maximum=8)
-        mutated["parent_id"] = tid
-        yield mutated
+            #mutate
+            mutated = self.mutator.get_random_mutations( testcase ,maximum=8)
+            mutated["parent_id"] = tid
+            yield mutated
 
     #to mutator
     def random_merge(self, tid1):

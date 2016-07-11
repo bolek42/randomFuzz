@@ -29,7 +29,7 @@ def process_cash( self, testcase, seed):
     stderr, crash, bitsets = callback_file( self, testcase, cmd, os.path.basename(seed), None, dumpfile="/tmp/crash-min.mp4")
     #fuzz crash
     while True:
-        mutated = self.mutator.get_random_mutations( testcase , maximum=1)#, start=711-16, stop=711+16, mutations=[3])
+        mutated = self.mutator.get_random_mutations( testcase , maximum=1, mutations=[3], start=711-16, stop=711+16)
         stderr, crash, bitsets = callback_file( self, mutated, cmd, os.path.basename(seed), None)
         for line in stderr.split("\n"):
             if "ERROR: AddressSanitizer:" in line: 
@@ -50,7 +50,7 @@ def process_cash( self, testcase, seed):
         
 
 
-f = randomFuzz(     ["teststuff/libav/avprobe", seed],
+f = randomFuzz(     ["teststuff/libav/avprobe", "teststuff/libav/avconv", seed],
                     workdir,
                     [],
                     avprobe_callback,
