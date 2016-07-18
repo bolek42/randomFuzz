@@ -10,17 +10,24 @@ import re
 #watchdog terminates processes after timeout
 #and delete left files
 class watchDog:
-    def __init__(self):
+    def __init__(self, workdir):
+        self.workdir=workdir
         self.watchDogQueue = Queue()
         d = Process(target=self.watchdog, args=())
         d.daemon=True
         d.start()
+        self.process = d
 
     def start(self, pid, files):
             self.watchDogQueue.put((time.time(), pid, files))
 
+    def exit(self):
+        print "terminating watchdog"
+        self.process.terminate()
+
     def watchdog(self):
         print "watchdog started"
+        os.chdir(self.workdir)
         timeout = 1
         while True:
             t,pid,files = self.watchDogQueue.get()
@@ -35,7 +42,8 @@ class watchDog:
                 try:
                     os.remove(fname)
                 except:
-                    pass
+                    print "Watchdog work dir %s" % os.getcwd()
+                    import traceback; traceback.print_exc()
 
 #parses asan and bitset files
 def parse_asan(pid, stderr):
@@ -72,7 +80,7 @@ def load_json(fname):
     with open(fname, "r") as f:
         return json.loads(f.read())
 
-def callback_file(self, testcase, cmd, seed, postprocess_callback=None, dumpfile=None):
+def callback_file(self, testcase, cmd, seed, postprocess_callback=None, dumpfile=None, execute=True):
     try:
         seed = self.seed
     except:
@@ -86,13 +94,16 @@ def callback_file(self, testcase, cmd, seed, postprocess_callback=None, dumpfile
     if postprocess_callback:
         data = postprocess_callback(data)
 
-    fname = hex(getrandbits(64))
-    with open( fname, "w") as f:
-        f.write(data)
-
     if dumpfile:
         with open( dumpfile, "w") as f:
             f.write(data)
+
+    if not execute:
+        return "", False, {}
+
+    fname = hex(getrandbits(64))
+    with open( fname, "w") as f:
+        f.write(data)
 
     cmd = (cmd % fname).split(" ")
     p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)

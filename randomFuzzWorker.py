@@ -26,28 +26,24 @@ class randomFuzzWorker():
         self.ip = ip
         self.port = port
         self.workdir = workdir
+        self.n_threads = cpu_count() if n_threads == 0 else n_threads
+        self.process_list = []
 
         self.bitsets = {}
         self.testcases = []
-        self.active = []
         self.executed_testcases = Value('i', 0)
 
-        self.watchDog = watchDog()
+        self.watchDog = watchDog(workdir)
         self.work_queue = Queue()
         self.testcase_count = Queue()
         self.update_queues = []
 
         self.testcase_report = Queue()
 
-        self.provision()
-        self.run()
-
 
     def provision(self):
         print "connecting"
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10*1024*1024)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10*1024*1024)
         s.settimeout(100000)
         s.connect((self.ip, self.port))
         self.sock = s
@@ -64,7 +60,6 @@ class randomFuzzWorker():
         self.testcases += provision["testcases"]
         self.bitsets = provision["bitsets"]
         self.crash_addr = provision["crash_addr"]
-        self.active = provision["active"][-300:]
         self.mutator = mutator(provision["seeds"])
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
@@ -77,6 +72,8 @@ class randomFuzzWorker():
                 import traceback; traceback.print_exc()
 
         os.chdir(self.workdir)
+        for fname in glob.glob("*sancov"):
+            os.remove(fname)
 
         #fetch initial testcases
         print "Got %d initial testcases" % len(provision["initial_testcases"])
@@ -90,11 +87,12 @@ class randomFuzzWorker():
     def run(self):
         #start worker
         sock = self.sock
-        for i in xrange(cpu_count() if n_threads == 0 else n_threads):
+        for i in xrange(self.n_threads):
             self.update_queues.append(Queue())
             d = Process(target=self.worker, args=(i,))
             d.daemon=True
             d.start()
+            self.process_list += [d]
             
 
         while True:
@@ -118,7 +116,7 @@ class randomFuzzWorker():
             #report
             report = {}
             report["testcase_report"] = []
-            while self.testcase_report.qsize() > 0 and len(report["testcase_report"]) < 10:
+            while self.testcase_report.qsize() > 0:
                 t = self.testcase_report.get()
                 report["testcase_report"].append(t)
 
@@ -126,8 +124,8 @@ class randomFuzzWorker():
             self.executed_testcases.value = 0
                 
             data = json.dumps(report)
-            sock.send(struct.pack('<I',len(data)))
-            sock.send(data)
+            sock.sendall(struct.pack('<I',len(data)))
+            sock.sendall(data)
 
     def apply_update(self, update):
         self.testcases += update["testcase_update"]
@@ -136,24 +134,14 @@ class randomFuzzWorker():
             self.bitsets[s] = bitset
 
         self.crash_addr = update["crash_addr"]
-        self.active = update["active"]
 
     #execute testcases and process results
     def worker(self, worker_id):
         print "worker started"
-        while self.work_queue.qsize() > 0:
-                testcase = self.work_queue.get()
-                self.execute_testcase(testcase)
+        self.worker_id = worker_id
         while True:
-            #randomly mutate testcases
             for mutated in self.get_testcases():
-                #apply updates
-                if self.update_queues[worker_id].qsize() > 0:
-                    update = self.update_queues[worker_id].get()
-                    self.apply_update(update)
-
                 self.execute_testcase(mutated)
-
 
 
     def execute_testcase(self, testcase):
@@ -211,22 +199,26 @@ class randomFuzzWorker():
             equal=True
             if not crash:
                 for s in reference["bitsets"]:
-                    if bitsets[s] != reference["bitsets"][s]:
+                    if s not in bitsets or bitsets[s] != reference["bitsets"][s]:
                         equal = False
             else:
                 equal = False
 
             #done
             if i >= len(testcase["mutators"]["data"]["mutations"]) - 1:
-                print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
+
                 if equal:
-                    print "Mutations: %d" % len(testcase["mutators"]["data"]["mutations"])
                     del testcase["minimize"]
-                    self.testcase_report.put(testcase)
                 else:
-                    print "Mutations: %d" % len(reference["mutators"]["data"]["mutations"])
                     if "minimize" in  reference: del reference["minimize"]
-                    self.testcase_report.put(reference)
+                    testcase = reference
+
+                if "random-merge" not in testcase["description"]:
+                    state = testcase["mutators"]["data"]["mutations"][-1]
+                    testcase["description"] = ("offset=%d: " % state["offset"]) + state["description"] 
+                print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
+                print "Mutations: %d" % len(testcase["mutators"]["data"]["mutations"])
+                self.testcase_report.put(testcase)
                 return
 
             #mutation was unused
@@ -249,6 +241,13 @@ class randomFuzzWorker():
     #genetic methods
     def get_testcases(self):
         while True:
+            #apply updates
+            try:
+                update = self.update_queues[self.worker_id].get(False)
+                self.apply_update(update)
+            except:
+                pass
+
             #initial and deterministic testcases
             try:
                 testcase = self.work_queue.get(False)
@@ -257,13 +256,12 @@ class randomFuzzWorker():
                 pass
 
             #choose
-            if len(self.testcases) == 0: return
-            while True:
-                tid = randrange(len(self.testcases))
-                if tid in self.active: break
+            if len(self.testcases) == 0: continue
+            tid = randrange(len(self.testcases))
 
             merged = self.random_merge(tid)
             if merged: yield merged
+
             #get
             testcase = self.testcases[tid]
 
@@ -275,7 +273,7 @@ class randomFuzzWorker():
     #to mutator
     def random_merge(self, tid1):
         try:
-            tid2 = choice(self.active)
+            tid2 = randrange(len(self.testcases))
             if tid1 != tid2:
                 mutated = deepcopy(self.testcases[tid1])
                 name = choice(mutated["mutators"].keys())
@@ -292,6 +290,14 @@ class randomFuzzWorker():
             #import traceback; traceback.print_exc()
             pass
 
+    def exit(self):
+        self.watchDog.exit()
+        for p in self.process_list:
+            print "killing", p
+            p.terminate()
+        self.sock.close()
+
+
 
 if __name__ == "__main__":
     import time
@@ -302,12 +308,17 @@ if __name__ == "__main__":
 
     while True:
         try:
-            randomFuzzWorker(sys.argv[1],int(sys.argv[2]), "teststuff/work", n_threads)
+            w = randomFuzzWorker(sys.argv[1],int(sys.argv[2]), "teststuff/work", n_threads)
+            w.provision()
+            w.run()
+
             time.sleep(1)
         except KeyboardInterrupt:
             import traceback; traceback.print_exc()
+            w.exit()
             os.kill(os.getpid(), 9)
         except:
             import traceback; traceback.print_exc()
+            w.exit()
             os.kill(os.getpid(), 9)
 t

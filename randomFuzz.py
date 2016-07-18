@@ -29,9 +29,8 @@ class randomFuzz:
     def __init__(self, files, workdir, seeds, callback, port=1337):
         #fuzzing state
         self.testcases = []
-        self.active = []
         self.callback = callback
-        self.watchDog = watchDog()
+        self.watchDog = watchDog(workdir)
         self.mutator = mutator(seeds)
         self.workdir = workdir
 
@@ -111,18 +110,13 @@ class randomFuzz:
             self.log("Loaded %d testcases" % len(self.testcases))
             self.bitsets = load_json("bitsets.json")
             self.crash_addr = load_json("crash_addr.json")
-            self.active = load_json("active.json")
         except:
             pass
-        if len(self.active) == 0:
-            self.get_active()
 
     #network
     def accept(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10*1024*1024)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10*1024*1024)
         s.settimeout(100)
         s.bind(("0.0.0.0", self.port))
         s.listen(1)
@@ -138,7 +132,6 @@ class randomFuzz:
         provision["testcases"] = self.testcases
         provision["bitsets"] = self.bitsets
         provision["crash_addr"] = self.crash_addr
-        provision["active"] = self.active
         provision["callback"] = b64encode(cloud.serialization.cloudpickle.dumps(self.callback))
 
         provision["initial_testcases"] = []
@@ -152,8 +145,8 @@ class randomFuzz:
 
         s = json.dumps(provision)
         last_tid = len(self.testcases)
-        conn.send(struct.pack('<I',len(s)))
-        conn.send(s)
+        conn.sendall(struct.pack('<I',len(s)))
+        conn.sendall(s)
         del provision
         del s
         print "worker provisioned"
@@ -170,7 +163,6 @@ class randomFuzz:
                     update["bitset_update"] = self.bitsets
 
                 update["crash_addr"] = self.crash_addr
-                update["active"] = self.active
 
                 s = json.dumps(update)
                 conn.send(struct.pack('<I',len(s)))
@@ -196,17 +188,15 @@ class randomFuzz:
 
     def apply_update(self):
         while True:
-            testcase, bitsets, crash_addr, active, log = self.update_queue.get()
+            testcase, bitsets, crash_addr, log = self.update_queue.get()
             self.testcases.append(testcase)
             self.bitsets = bitsets
             self.crash_addr = crash_addr
-            self.active = active
             for l in log:
                 self.log(l)
 
     def process_report(self):
         print "update processor started"
-        updated = 0
         while True:
             testcase = self.report_queue.get()
             log = []
@@ -226,13 +216,11 @@ class randomFuzz:
                     self.bitsets[s] |= bitset
 
                 if new_blocks > 0:
-                    updated += 1
                     testcase["new_blocks"] = new_blocks
                     testcase["blocks"] = blocks
                     testcase["id"] = len(self.testcases)
                     log.append("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
                     save_json("testcase-%d.json" % (len(self.testcases)),testcase)
-                    self.active.append(len(self.testcases))
                     self.testcases.append(testcase)
                     save_json("bitsets.json", self.bitsets)
 
@@ -243,6 +231,7 @@ class randomFuzz:
                     log.append("New Crash @ %s !!" % (crash))
                     save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
                     save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
+                    self.callback(self, testcase, dumpfile="crash-%d.bin" % len(self.crash_addr), execute=False)
 
                     #notify
                     cmd = "(echo \"Subject: Crash %s @ %s!!\" ; cat crash-%d.stderr) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.workdir), crash, len(self.crash_addr))
@@ -252,39 +241,8 @@ class randomFuzz:
                     save_json("crash_addr.json", self.crash_addr)
 
             if new_blocks > 0 or "crash" in testcase:
-                self.update_queue.put( (testcase, self.bitsets, self.crash_addr, self.active, log))
+                self.update_queue.put( (testcase, self.bitsets, self.crash_addr, log))
             
-            if self.report_queue.qsize() == 0 and updated > 20:
-                self.get_active()
-                updated = -self.report_queue.qsize()
-
-
-    #set testcases to inactive, if there is an other testcase,
-    #that covers all blocks and more
-    def get_active(self):
-        if len(self.testcases) < 500:
-            if len(self.active) == 0:
-                self.active = range(len(self.testcases))
-            active_old = self.active
-            self.active = []
-            for tid1 in active_old:
-                active = True
-                for tid2 in active_old:
-                    if tid1 != tid2:
-                        for s in self.testcases[tid1]["bitsets"]:
-                            b1 = self.testcases[tid1]["bitsets"][s]
-                            b2 = self.testcases[tid2]["bitsets"][s]
-                            if bin(b2).count("1") > bin(b1).count("1") and bin((~b2)&b1).count("1") == 0:
-                                #print "%d is subset of %d" % (tid1, tid2)
-                                active = False
-                                break
-
-                if active:
-                    self.active += [tid1]
-        else:
-            self.active = range(len(self.testcases)-200,len(self.testcases))
-        save_json("active.json", self.active)
-
     
     #ui
     def ui(self):
@@ -307,7 +265,6 @@ class randomFuzz:
             print "Total testcases: %d" % self.total_testcases
             print "Crash: %d" % len(self.crash_addr)
             print "Report Queue: %d" % self.report_queue.qsize()
-            print "Active Testcases: %d" % len(self.active)
             t = time.time() - self.t0
             print "Time: %dd %dh %dm %ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"
