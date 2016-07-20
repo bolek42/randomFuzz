@@ -2,7 +2,7 @@
 import os
 import pickle
 import sys
-from multiprocessing import Process,Queue
+from multiprocessing import Process,Queue,Value
 from random import getrandbits, shuffle, choice, randrange
 import time
 import socket
@@ -26,13 +26,15 @@ from utils import *
 from mutator import mutator
 
 class randomFuzz:
-    def __init__(self, files, workdir, seeds, callback, port=1337):
+    def __init__(self, files, seed, workdir, seeds, callback, port=1337):
         #fuzzing state
         self.testcases = []
         self.callback = callback
         self.watchDog = watchDog(workdir)
         self.mutator = mutator(seeds)
         self.workdir = workdir
+        self.seed = seed
+        self.connected_worker = Value('i', 0)
 
         self.seeds = seeds
         self.port = port
@@ -117,7 +119,7 @@ class randomFuzz:
     def accept(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.settimeout(100)
+        s.settimeout(100000)
         s.bind(("0.0.0.0", self.port))
         s.listen(1)
         s.setblocking(1)
@@ -127,7 +129,9 @@ class randomFuzz:
 
     def connection_handler(self, conn):
         print "worker connected"
+        self.connected_worker.value += 1
         provision = {}
+        provision["seed"] = self.seed
         provision["seeds"] = self.seeds
         provision["testcases"] = self.testcases
         provision["bitsets"] = self.bitsets
@@ -143,15 +147,15 @@ class randomFuzz:
         for fname in self.files:
             provision["files"].append(fname)
 
-        s = json.dumps(provision)
-        last_tid = len(self.testcases)
-        conn.sendall(struct.pack('<I',len(s)))
-        conn.sendall(s)
-        del provision
-        del s
-        print "worker provisioned"
-
         try:
+            s = json.dumps(provision)
+            last_tid = len(self.testcases)
+            conn.sendall(struct.pack('<I',len(s)))
+            conn.sendall(s)
+            del provision
+            del s
+            print "worker provisioned"
+
             while True:
                 #send update
                 update = {}
@@ -184,6 +188,7 @@ class randomFuzz:
         except:
             import traceback; traceback.print_exc()
             conn.close()
+            self.connected_worker.value -= 1
             return
 
     def apply_update(self):
@@ -225,22 +230,24 @@ class randomFuzz:
                     save_json("bitsets.json", self.bitsets)
 
             #handle new crash
+            new_crash = False
             if "crash" in testcase:
                 crash = testcase["crash"]
                 if crash not in self.crash_addr:
+                    new_crash = True
                     log.append("New Crash @ %s !!" % (crash))
                     save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
                     save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
                     self.callback(self, testcase, dumpfile="crash-%d.bin" % len(self.crash_addr), execute=False)
 
                     #notify
-                    cmd = "(echo \"Subject: Crash %s @ %s!!\" ; cat crash-%d.stderr) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.workdir), crash, len(self.crash_addr))
+                    cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr))
                     os.system(cmd)
 
                     self.crash_addr += [crash]
                     save_json("crash_addr.json", self.crash_addr)
 
-            if new_blocks > 0 or "crash" in testcase:
+            if new_blocks > 0 or new_crash:
                 self.update_queue.put( (testcase, self.bitsets, self.crash_addr, log))
             
     
@@ -259,11 +266,12 @@ class randomFuzz:
 
             #print stuff
             print "\x1b[0;0H"+"\x1b[2J"+"\r", 
-            print "-=randomFuzz @ %d=-" % self.port
+            print "-=randomFuzz %s @ %d=-" % (self.seed, self.port)
             print "Testcases: %d" % (len(self.testcases))
             print "Rate: %.2f/s" % self.rate
             print "Total testcases: %d" % self.total_testcases
             print "Crash: %d" % len(self.crash_addr)
+            print "Worker: %d" % self.connected_worker.value
             print "Report Queue: %d" % self.report_queue.qsize()
             t = time.time() - self.t0
             print "Time: %dd %dh %dm %ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
@@ -271,7 +279,7 @@ class randomFuzz:
             for s in self.bitsets:
                 covered = bin(self.bitsets[s]).count("1")
                 missing = bin(~self.bitsets[s]).count("0")
-                print "%s: %d covered, %d missing" % (s,covered,missing)
+                print "%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing))
 
             print "\nLog:"
             for message in self._log[-16:]:

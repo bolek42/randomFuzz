@@ -63,6 +63,7 @@ def parse_asan(pid, stderr):
         try:
             errorline = re.findall( "ERROR\: AddressSanitizer: .*", stderr)[0]
             crash = re.findall("pc 0x[0-9a-f]*", errorline)[0][3:]
+            errorline += ("#"*0x42)+"\n"+errorline+"\n"+("#"*0x42)
         except:
             crash = "0x42424242"
 
@@ -80,17 +81,17 @@ def load_json(fname):
     with open(fname, "r") as f:
         return json.loads(f.read())
 
-def callback_file(self, testcase, cmd, seed, postprocess_callback=None, dumpfile=None, execute=True):
+def callback_file(self, testcase, cmd, postprocess_callback=None, dumpfile=None, execute=True):
     try:
-        seed = self.seed
+        seed_data = self.seed_data
     except:
-        with open(seed, "r") as f:
-            seed = f.read()
-            self.seed = seed
+        with open(self.seed, "r") as f:
+            seed_data = f.read()
+            self.seed_data = seed_data
 
     m = self.mutator
 
-    data = m.mutate_seed(testcase["mutators"]["data"], seed)
+    data = m.mutate_seed(testcase["mutators"]["data"], seed_data)
     if postprocess_callback:
         data = postprocess_callback(data)
 

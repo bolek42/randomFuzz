@@ -10,7 +10,7 @@ from random import *
 cmd = "./avconv-git -i %s /tmp/null.mp4 -y"
 
 def avprobe_callback(self, testcase, dumpfile=None, execute=True):
-    return callback_file( self, testcase, cmd, os.path.basename(seed), dumpfile=dumpfile, execute=execute)
+    return callback_file( self, testcase, cmd, dumpfile=dumpfile, execute=execute)
 
 
 def process_crash(self, stderr, testcase):
@@ -116,6 +116,7 @@ if len(sys.argv) >= 5:
 
 
 f = randomFuzz(     ["teststuff/libav/avprobe", "teststuff/libav/avconv-git", seed],
+                    os.path.basename(seed),
                     workdir,
                     [],
                     avprobe_callback,

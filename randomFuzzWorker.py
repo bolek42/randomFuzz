@@ -25,7 +25,7 @@ class randomFuzzWorker():
 
         self.ip = ip
         self.port = port
-        self.workdir = workdir
+        self.workdir = os.path.abspath(workdir)
         self.n_threads = cpu_count() if n_threads == 0 else n_threads
         self.process_list = []
 
@@ -33,16 +33,20 @@ class randomFuzzWorker():
         self.testcases = []
         self.executed_testcases = Value('i', 0)
 
-        self.watchDog = watchDog(workdir)
         self.work_queue = Queue()
         self.testcase_count = Queue()
         self.update_queues = []
 
         self.testcase_report = Queue()
+        self.watchDog = None
+
+        #create workdir
+        if not os.path.exists(self.workdir):
+            os.makedirs(self.workdir)
 
 
     def provision(self):
-        print "connecting"
+        print "connecting %s:%d" % (self.ip, self.port)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(100000)
         s.connect((self.ip, self.port))
@@ -60,6 +64,7 @@ class randomFuzzWorker():
         self.testcases += provision["testcases"]
         self.bitsets = provision["bitsets"]
         self.crash_addr = provision["crash_addr"]
+        self.seed = provision["seed"]
         self.mutator = mutator(provision["seeds"])
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
@@ -71,6 +76,7 @@ class randomFuzzWorker():
             except:
                 import traceback; traceback.print_exc()
 
+        #prepare workdir
         os.chdir(self.workdir)
         for fname in glob.glob("*sancov"):
             os.remove(fname)
@@ -84,9 +90,16 @@ class randomFuzzWorker():
         del provision
         print "privision done"
 
-    def run(self):
-        #start worker
+    def run(self, n_testcases=0):
+        #prepare workdir
+        os.chdir(self.workdir)
+        for fname in glob.glob("*sancov"):
+            os.remove(fname)
+
+        #start worker threads
+        self.watchDog = watchDog(self.workdir)
         sock = self.sock
+        self.update_queues = []
         for i in xrange(self.n_threads):
             self.update_queues.append(Queue())
             d = Process(target=self.worker, args=(i,))
@@ -95,7 +108,8 @@ class randomFuzzWorker():
             self.process_list += [d]
             
 
-        while True:
+        executed_testcases_old = 0
+        while self.executed_testcases.value < n_testcases or n_testcases == 0:
             #wait for updates
             n = struct.unpack('<I',sock.recv(4))[0]
             d = ""
@@ -120,8 +134,8 @@ class randomFuzzWorker():
                 t = self.testcase_report.get()
                 report["testcase_report"].append(t)
 
-            report["executed_testcases"] = self.executed_testcases.value
-            self.executed_testcases.value = 0
+            report["executed_testcases"] = self.executed_testcases.value - executed_testcases_old
+            executed_testcases_old =  self.executed_testcases.value
                 
             data = json.dumps(report)
             sock.sendall(struct.pack('<I',len(data)))
@@ -180,10 +194,10 @@ class randomFuzzWorker():
 
             if new_blocks > 0:
                 #remove unused mutations
+                testcase["new_blocks"] = new_blocks
                 minimize = {}
                 minimize["i"] = 0
                 minimize["reference"] = deepcopy(testcase)
-                testcase["new_blocks"] = new_blocks
                 testcase["minimize"] = minimize
                 self.work_queue.put(testcase)
 
@@ -213,7 +227,7 @@ class randomFuzzWorker():
                     if "minimize" in  reference: del reference["minimize"]
                     testcase = reference
 
-                if "random-merge" not in testcase["description"]:
+                if "random-merge" not in testcase["description"] and len(testcase["mutators"]["data"]["mutations"]) > 0:
                     state = testcase["mutators"]["data"]["mutations"][-1]
                     testcase["description"] = ("offset=%d: " % state["offset"]) + state["description"] 
                 print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
@@ -290,35 +304,47 @@ class randomFuzzWorker():
             #import traceback; traceback.print_exc()
             pass
 
-    def exit(self):
-        self.watchDog.exit()
+    def stop(self):
+        if self.watchDog:
+            self.watchDog.exit()
+            self.watchDog = None
+
         for p in self.process_list:
             print "killing", p
             p.terminate()
-        self.sock.close()
-
+        self.process_list = []
+        self.executed_testcases.value = 0
 
 
 if __name__ == "__main__":
     import time
-    if len(sys.argv) == 4:
-        n_threads = int(sys.argv[3])
-    else:
-        n_threads = 0
+    if len(sys.argv) < 3:
+        print "usage: %s ip port1 port2 ..." % sys.argv[0]
+        sys.exit(1)
 
-    while True:
-        try:
-            w = randomFuzzWorker(sys.argv[1],int(sys.argv[2]), "teststuff/work", n_threads)
-            w.provision()
-            w.run()
+    #set up workers
+    workdir = os.getcwd()
+    workers = []
+    for port in sys.argv[2:]:
+        os.chdir(workdir)
+        w = randomFuzzWorker(sys.argv[1],int(port), "teststuff/work/%d" % int(port))
+        w.provision()
+        workers += [w]
 
-            time.sleep(1)
-        except KeyboardInterrupt:
-            import traceback; traceback.print_exc()
-            w.exit()
-            os.kill(os.getpid(), 9)
-        except:
-            import traceback; traceback.print_exc()
-            w.exit()
-            os.kill(os.getpid(), 9)
-t
+    try:
+        while True:
+            for i in xrange(len(workers)):
+                print ">>> Working on worker %d <<<" % i
+                workers[i].run(10000)
+                workers[i].stop()
+            
+    except KeyboardInterrupt:
+        import traceback; traceback.print_exc()
+        for w in workers:
+            w.stop()
+        os.kill(os.getpid(), 9)
+    except:
+        import traceback; traceback.print_exc()
+        for w in workers:
+            w.stop()
+        os.kill(os.getpid(), 9)

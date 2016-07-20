@@ -63,7 +63,7 @@ class mutator(seeds):
         mutator = mutated["mutators"][name]
 
         if len(self.mutation_cache) == 0:
-            print "build cache"
+            #print "build cache"
             for m in xrange(len(self.mutations)):
                 if m not in self.mutation_cache:
                     self.mutation_cache[m] = []
