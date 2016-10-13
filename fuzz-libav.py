@@ -19,19 +19,24 @@ def process_crash(self, stderr, testcase):
             try:
                 addr = re.findall("on [a-z ]*address 0x[0-9a-f]*", line)[0]
                 addr = re.findall("0x[0-9a-f]*", addr)[0]
+                crash = re.findall("pc 0x[0-9a-f]*", line)[0]
+                addr = "%s-%s" % (crash,addr)
                 if addr not in self.addrs:
                     if "READ" in stderr:
                         cause = "READ"
-                    else:
+                    elif "WRITE" in stderr:
                         cause = "WRITE"
+                    else:
+                        cause = "OTHER"
 
                     stderr, crash, bitsets = avprobe_callback( self, testcase, dumpfile="/tmp/crash-%s-%s.mp4" % (addr,cause))
-                    save_data("/tmp/crash-%s-write.stderr" % addr, stderr)
+                    save_data("/tmp/crash-%s-%s.stderr" % (addr, cause), stderr)
                     print cause, addr, testcase["description"]
                     self.addrs += [addr]
                     self.crashes += [testcase]
             except:
-                print stderr
+                #print stderr
+                import traceback; traceback.print_exc()
                 stderr, crash, bitsets = callback_file( self, testcase, cmd, os.path.basename(seed), None, dumpfile="/tmp/crash-%s.mp4" % "other")
 
 
@@ -112,6 +117,7 @@ port = int(sys.argv[3])
 if len(sys.argv) >= 5:
     crashes = []
     for fname in sys.argv[4:]:
+        print fname
         crashes += [load_json(fname)]
 
 
