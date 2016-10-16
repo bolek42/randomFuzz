@@ -233,6 +233,7 @@ class randomFuzz:
             new_crash = False
             if "crash" in testcase:
                 crash = testcase["crash"]
+                crash = re.findall("0x[0-9a-f]*", crash)[0]
                 if crash not in self.crash_addr:
                     new_crash = True
                     log.append("New Crash @ %s !!" % (crash))
@@ -289,9 +290,6 @@ class randomFuzz:
     def log(self, msg):
         self._log.append("%s %s" % (time.strftime("%H:%M:%S", time.gmtime()), msg))
             
-
-
-
 
 if __name__ == "__main__":
     pass
