@@ -81,7 +81,7 @@ def load_json(fname):
     with open(fname, "r") as f:
         return json.loads(f.read())
 
-def callback_file(self, testcase, cmd, postprocess_callback=None, dumpfile=None, execute=True):
+def callback_file(self, testcase, postprocess_callback=None, dumpfile=None, execute=True):
     try:
         seed_data = self.seed_data
     except:
@@ -106,7 +106,7 @@ def callback_file(self, testcase, cmd, postprocess_callback=None, dumpfile=None,
     with open( fname, "w") as f:
         f.write(data)
 
-    cmd = (cmd % fname).split(" ")
+    cmd = (self.cmd % fname).split(" ")
     p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
     self.watchDog.start(p.pid, [fname])
 

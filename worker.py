@@ -17,7 +17,7 @@ from copy import deepcopy
 from shutil import copy2
 
 
-class randomFuzzWorker():
+class worker():
     def __init__(self, ip, port, workdir, n_threads=0):
         os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1:symbolize=1"
         os.environ["MALLOC_CHECK_"]="0"
@@ -61,6 +61,7 @@ class randomFuzzWorker():
         del d
 
         #generic
+        self.cmd = provision["cmd"]
         self.testcases += provision["testcases"]
         self.bitsets = provision["bitsets"]
         self.crash_addr = provision["crash_addr"]
@@ -69,15 +70,18 @@ class randomFuzzWorker():
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
         #write Files to Disk
-        for fname in provision["files"]:
+        os.chdir(self.workdir)
+        for fname, data in provision["files"].iteritems():
             try:
-                copy2(fname, self.workdir)
+                print "received %s %dkB" % (fname, len(data)/1024)
+                f = open(fname, "w")
+                f.write(b64decode(data))
+                f.close()
                 os.chmod(fname, 0700)
             except:
                 import traceback; traceback.print_exc()
 
         #prepare workdir
-        os.chdir(self.workdir)
         for fname in glob.glob("*sancov"):
             os.remove(fname)
 
