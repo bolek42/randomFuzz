@@ -115,25 +115,28 @@ class master:
         os.environ["LD_LIBRARY_PATH"]="."
 
         #determine execution time for each file
-        results = []
-        for fname in glob.glob("./*"):
-            start = time.time()
-            for i in xrange(1):
-                cmd = (self.cmd % fname).split(" ")
+        try:
+            results = []
+            for fname in glob.glob("./*"):
+                start = time.time()
+                for i in xrange(1):
+                    cmd = (self.cmd % fname).split(" ")
 
-                p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
-                self.watchDog.start(p.pid, [])
-                stdout, stderr = p.communicate(input="")
-                _, b = parse_asan(p.pid, stderr)
+                    p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
+                    self.watchDog.start(p.pid, [])
+                    stdout, stderr = p.communicate(input="")
+                    _, b = parse_asan(p.pid, stderr)
 
-            hit, missed = 0, 1
-            for s in b:
-                hit += bin(b[s]).count("1")
-                missed += bin(b[s]).count("0")
-            
-            t = time.time() - start
-            print "%fs for %s (%d hit %.2f%%)" % (t, fname, hit, (hit*100.)/(hit+missed))
-            results += [(fname, b, t, 0)]
+                hit, missed = 0, 1
+                for s in b:
+                    hit += bin(b[s]).count("1")
+                    missed += bin(b[s]).count("0")
+                
+                t = time.time() - start
+                print "%fs for %s (%d hit %.2f%%)" % (t, fname, hit, (hit*100.)/(hit+missed))
+                results += [(fname, b, t, 0)]
+        except KeyboardInterrupt:
+            pass
 
         #sort by execution time
         bitsets = {}
@@ -220,7 +223,7 @@ class master:
         provision["initial_testcases"] = [self.initial_testcase]
 
         testcases = []
-        for t in testcases:
+        for t in self.testcases:
             testcases += [json.dumps(t)]
 
         provision["testcases"] = json.dumps(testcases)
