@@ -62,12 +62,14 @@ class worker():
 
         #generic
         self.cmd = provision["cmd"]
-        self.testcases += provision["testcases"]
         self.bitsets = provision["bitsets"]
         self.crash_addr = provision["crash_addr"]
         self.seed = provision["seed"]
         self.mutator = mutator(provision["seeds"])
         self.callback = pickle.loads(b64decode(provision["callback"]))
+
+        for t in json.loads(provision["testcases"]):
+            self.testcases += [json.loads(t)]
 
         #write Files to Disk
         os.chdir(self.workdir)

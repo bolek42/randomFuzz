@@ -214,11 +214,16 @@ class master:
         provision["cmd"] = self.cmd
         provision["seed"] = self.seed
         provision["seeds"] = self.seeds
-        provision["testcases"] = self.testcases
         provision["bitsets"] = self.bitsets
         provision["crash_addr"] = self.crash_addr
         provision["callback"] = b64encode(cloud.serialization.cloudpickle.dumps(self.callback))
         provision["initial_testcases"] = [self.initial_testcase]
+
+        testcases = []
+        for t in testcases:
+            testcases += [json.dumps(t)]
+
+        provision["testcases"] = json.dumps(testcases)
 
         provision["files"] = {}
         for fname in self.files:
@@ -299,7 +304,7 @@ class master:
                     new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
                     self.bitsets[s] |= bitset
 
-                if new_blocks > 0:
+                if new_blocks > 10:
                     testcase["new_blocks"] = new_blocks
                     testcase["blocks"] = blocks
                     testcase["id"] = len(self.testcases)
