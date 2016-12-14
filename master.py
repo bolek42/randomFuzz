@@ -223,10 +223,11 @@ class master:
         provision["initial_testcases"] = [self.initial_testcase]
 
         testcases = []
-        for t in self.testcases:
-            testcases += [json.dumps(t)]
+        for i in xrange(len(self.testcases)):
+            with open("testcase-%d.json" % i, "r") as f:
+                testcases += [b64encode(f.read())]
 
-        provision["testcases"] = json.dumps(testcases)
+        provision["testcases"] = b64encode(json.dumps(testcases))
 
         provision["files"] = {}
         for fname in self.files:
@@ -307,14 +308,14 @@ class master:
                     new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
                     self.bitsets[s] |= bitset
 
-                if new_blocks > 10:
-                    testcase["new_blocks"] = new_blocks
-                    testcase["blocks"] = blocks
-                    testcase["id"] = len(self.testcases)
-                    log.append("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
-                    save_json("testcase-%d.json" % (len(self.testcases)),testcase)
-                    self.testcases.append(testcase)
-                    save_json("bitsets.json", self.bitsets)
+            if new_blocks > 1:
+                testcase["new_blocks"] = new_blocks
+                testcase["blocks"] = blocks
+                testcase["id"] = len(self.testcases)
+                log.append("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
+                save_json("testcase-%d.json" % (len(self.testcases)),testcase)
+                self.testcases.append(testcase)
+                save_json("bitsets.json", self.bitsets)
 
             #handle new crash
             new_crash = False
@@ -335,7 +336,7 @@ class master:
                     self.crash_addr += [crash]
                     save_json("crash_addr.json", self.crash_addr)
 
-            if new_blocks > 0 or new_crash:
+            if new_blocks > 1 or new_crash:
                 self.update_queue.put( (testcase, self.bitsets, self.crash_addr, log))
             
     

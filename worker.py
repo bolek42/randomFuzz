@@ -68,8 +68,8 @@ class worker():
         self.mutator = mutator(provision["seeds"])
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
-        for t in json.loads(provision["testcases"]):
-            self.testcases += [json.loads(t)]
+        for t in json.loads(b64decode(provision["testcases"])):
+            self.testcases += [b64decode(json.loads(t))]
 
         #write Files to Disk
         os.chdir(self.workdir)
