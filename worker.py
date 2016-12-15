@@ -277,7 +277,15 @@ class worker():
 
             #choose
             if len(self.testcases) == 0: continue
-            tid = randrange(len(self.testcases))
+            s = reduce(lambda x,y: x+y["new_blocks"], self.testcases, 0)
+
+            r = randrange(s)
+            for t in sorted(self.testcases, key=lambda t: t["new_blocks"], reverse=True):
+                r -= t["new_blocks"]
+                if r < 0:
+                    break
+            tid = self.testcases.index(t)
+
 
             merged = self.random_merge(tid)
             if merged: yield merged
