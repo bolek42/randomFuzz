@@ -78,6 +78,7 @@ class master:
         self.initial_testcase["parent_id"] = 0
         self.initial_testcase["mutators"] = {}
         self.initial_testcase["description"] = ""
+        self.initial_testcase["childs"] = []
 
     #TODO mutations
     def add_mutator(self, name, length=42):
@@ -308,14 +309,20 @@ class master:
                     new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
                     self.bitsets[s] |= bitset
 
+            #append new testcase
             if new_blocks > 1:
                 testcase["new_blocks"] = new_blocks
                 testcase["blocks"] = blocks
                 testcase["id"] = len(self.testcases)
-                log.append("New Blocks: %d Description: %s" % (new_blocks, testcase["description"]))
+                testcase["childs"] = []
+                log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
                 save_json("testcase-%d.json" % (len(self.testcases)),testcase)
                 self.testcases.append(testcase)
                 save_json("bitsets.json", self.bitsets)
+
+                pid = testcase["parent_id"]
+                self.testcases[pid]["childs"] += [testcase["id"]]
+                save_json("testcase-%d.json" % (pid),self.testcases[pid])
 
             #handle new crash
             new_crash = False
@@ -379,8 +386,9 @@ class master:
         t = time.time() - self.t0
         timestamp =  "%dd %02dh %02dm %02ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
         self._log.append("%s %s" % (timestamp, msg))
+        with open("log", "a") as f:
+            f.write("%s %s\n" % (timestamp, msg))
             
-
     def crash_fuzz( self, files):
         self.addrs = []
         self.crashes = []

@@ -94,16 +94,19 @@ class seeds:
         def string(s):
             return self.pascal_string(s) + self.c_string(s)
         ret = []
-        ret += string("%n"*16)
+        for i in xrange(16):
+            ret += string("%n"*(2**i))
+
         for i in xrange(64):
             ret += string("\x00"*i)
+
         ret += string("\x00"*0x7f)
         ret += string("\x00"*0xff)
         ret += string("%n"*1024)
         ret += string("%n"*4095)
 
-        for c in "\x00 !\"$%&/()=?,;.:-_#'+*<>|":
-            ret += [c*16]
+        for c in " !\"$%&/()=?,;.:-_#'+*<>|\x00":
+            ret += [c*64]
 
         #ret += self.pascal_string("%n"*0x7fff)
         #ret += self.c_string("%n"*0x7fff)

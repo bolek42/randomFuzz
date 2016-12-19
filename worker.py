@@ -5,7 +5,7 @@ import os
 from multiprocessing import Process,Queue,cpu_count,Value
 import json
 from base64 import b64encode, b64decode
-from random import getrandbits, randrange, choice
+from random import getrandbits, randrange, choice, shuffle
 from subprocess import Popen, PIPE, STDOUT
 import re
 import struct
@@ -18,7 +18,7 @@ from shutil import copy2
 
 
 class worker():
-    def __init__(self, ip, port, workdir, n_threads=0):
+    def __init__(self, ip, port, workdir, n_threads=0, mutations=None):
         os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1:symbolize=1"
         os.environ["MALLOC_CHECK_"]="0"
         os.environ["LD_LIBRARY_PATH"]="."
@@ -28,6 +28,8 @@ class worker():
         self.workdir = os.path.abspath(workdir)
         self.n_threads = cpu_count() if n_threads == 0 else n_threads
         self.process_list = []
+        self.mutations = mutations
+        self.random_merge_cache = {}
 
         self.bitsets = {}
         self.testcases = []
@@ -69,7 +71,7 @@ class worker():
         self.callback = pickle.loads(b64decode(provision["callback"]))
 
         for t in json.loads(b64decode(provision["testcases"])):
-            self.testcases += [b64decode(json.loads(t))]
+            self.testcases += [json.loads(b64decode(t))]
 
         #write Files to Disk
         os.chdir(self.workdir)
@@ -136,9 +138,24 @@ class worker():
             #report
             report = {}
             report["testcase_report"] = []
-            while self.testcase_report.qsize() > 0:
+            i = 0
+            #get report with most new_blocks from queue
+            while self.testcase_report.qsize() > 0 and i < 10:
+                t = t0 = t_max = self.testcase_report.get()
+                self.testcase_report.put(t0)
+                while t != t0:
+                    t = self.testcase_report.get()
+                    self.testcase_report.put(t)
+                    if t["new_blocks"] > t_max["new_blocks"]:
+                        t_max = t
+
                 t = self.testcase_report.get()
+                while t != t_max:
+                    t = self.testcase_report.get()
+                    self.testcase_report.put(t)
+    
                 report["testcase_report"].append(t)
+                i += 1
 
             report["executed_testcases"] = self.executed_testcases.value - executed_testcases_old
             executed_testcases_old =  self.executed_testcases.value
@@ -148,12 +165,17 @@ class worker():
             sock.sendall(data)
 
     def apply_update(self, update):
-        self.testcases += update["testcase_update"]
+        for t in update["testcase_update"]:
+            pid = t["parent_id"]
+            self.testcases += [t]
+            if t["id"] > 0:
+                self.testcases[pid]["childs"] += [t["id"]]
 
         for s,bitset in update["bitset_update"].iteritems():
             self.bitsets[s] = bitset
 
         self.crash_addr = update["crash_addr"]
+        self.random_merge_cache = {}
 
     #execute testcases and process results
     def worker(self, worker_id):
@@ -188,19 +210,17 @@ class worker():
             self.testcase_report.put(testcase)
 
 
+        #found new blocks, requeue to remove unused mutations
         if "minimize" not in testcase:
-            #check for new edge
             new_blocks = 0
-            blocks = 0
             for s in bitsets:
                 bitset = int(bitsets[s])
-                blocks += bin(bitset).count("1")
-                new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
+                new_blocks += (~self.bitsets[s]) & bitset
                 self.bitsets[s] |= bitset
 
             if new_blocks > 0:
                 #remove unused mutations
-                testcase["new_blocks"] = new_blocks
+                testcase["new_blocks"] = bin(new_blocks).count("1")
                 minimize = {}
                 minimize["i"] = 0
                 minimize["reference"] = deepcopy(testcase)
@@ -209,40 +229,39 @@ class worker():
 
         #remove unused mutations
         else:
-            try:
-                i = testcase["minimize"]["i"]
-                reference = testcase["minimize"]["reference"]
-            except:
-                print testcase["minimize"]
-                import os; os.kill(os.getpid(), 9)
+            i = testcase["minimize"]["i"]
+            reference = testcase["minimize"]["reference"]
 
-            equal=True
-            if not crash:
-                for s in reference["bitsets"]:
-                    if s not in bitsets or bitsets[s] != reference["bitsets"][s]:
-                        equal = False
-            else:
-                equal = False
+            #test if testcase covered equal or more blocks
+            ge = False
+            if not crash: 
+                new_blocks = 0
+                for s in testcase["bitsets"]:
+                    bitset = int(bitsets[s])
+                    new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
+
+                if new_blocks >= reference["new_blocks"]:
+                    ge = True
 
             #done
             if i >= len(testcase["mutators"]["data"]["mutations"]) - 1:
-
-                if equal:
+                if ge:
                     del testcase["minimize"]
                 else:
                     if "minimize" in  reference: del reference["minimize"]
                     testcase = reference
-
                 if "random-merge" not in testcase["description"] and len(testcase["mutators"]["data"]["mutations"]) > 0:
                     state = testcase["mutators"]["data"]["mutations"][-1]
                     testcase["description"] = ("offset=%d: " % state["offset"]) + state["description"] 
+
                 print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
-                print "Mutations: %d" % len(testcase["mutators"]["data"]["mutations"])
+                print "Mutations: %d" % len(testcase["mutators"]["data"]["mutations"]), 
+                print "Report Queue: %d" % self.testcase_report.qsize()
                 self.testcase_report.put(testcase)
                 return
 
             #mutation was unused
-            if equal:
+            if not ge:
                 #print "%d unused" % i
                 del testcase["minimize"]["reference"]
                 testcase["minimize"]["reference"] = deepcopy(testcase)
@@ -294,29 +313,40 @@ class worker():
             testcase = self.testcases[tid]
 
             #mutate
-            mutated = self.mutator.get_random_mutations( testcase ,maximum=8)
+            mutated = self.mutator.get_random_mutations(testcase ,maximum=8, mutations=self.mutations)
             mutated["parent_id"] = tid
             yield mutated
 
     #to mutator
-    def random_merge(self, tid1):
-        try:
-            tid2 = randrange(len(self.testcases))
-            if tid1 != tid2:
-                mutated = deepcopy(self.testcases[tid1])
-                name = choice(mutated["mutators"].keys())
-                mutator1 = mutated["mutators"][name]
-                mutator2 = self.testcases[tid2]["mutators"][name]
-                l1 = randrange(len(mutator1["mutations"])) if len(mutator1["mutations"]) > 0 else 0
-                l2 = randrange(len(mutator2["mutations"])) if len(mutator2["mutations"]) > 0 else 0
-                mutator1["mutations"] = mutator1["mutations"][:l1] + mutator2["mutations"][:l2]
-                mutated["mutators"][name] = mutator1
-                mutated["description"] = "%s radnom merge %d-%d" % (name, tid1,tid2)
-                mutated["parent_id"] = tid1
-                return mutated
-        except:
-            #import traceback; traceback.print_exc()
-            pass
+    def random_merge(self, tid):
+        #if tid == 0: return None
+        mutated = deepcopy(self.testcases[tid])
+
+        def get_mutations(parent_id, name, mutations=[]):
+            for tid in self.testcases[parent_id]["childs"]:
+                t  = self.testcases[tid]
+                if t["parent_id"] == parent_id and t["id"] != parent_id:
+                    for m in t["mutators"][name]["mutations"]:
+                        if m not in mutations:
+                            mutations += [m]
+                    mutations = get_mutations(tid, name, mutations)
+            return mutations
+
+        name = choice(mutated["mutators"].keys())
+        if tid not in self.random_merge_cache:
+            self.random_merge_cache[tid] = get_mutations(tid, name)
+
+            
+        mutations = self.random_merge_cache[tid]
+        if len(mutations) == 0:
+            return None
+
+        shuffle(mutations)
+        mutated["mutators"][name]["mutations"] += mutations[:randrange(min(10,len(mutations)))]
+        mutated["description"] = "%s: random-merge %d" % (name, tid)
+        mutated["parent_id"] = tid
+        
+        return mutated
 
     def stop(self):
         if self.watchDog:

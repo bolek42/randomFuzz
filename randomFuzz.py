@@ -19,6 +19,8 @@ args:
 \t--ip=         ip
 \t--seed=       seed
 \t--dir=        work dir
+\t--threads=    worker threads
+\t--bitflip     bit- /byteflip only
 """
 
 def usage():
@@ -28,12 +30,15 @@ def usage():
 try:
     what = sys.argv[1]
     opt_short = "h"
-    opt_long = ["help", "cmd=", "port=", "seed=", "dir=", "ip="]
+    opt_long = ["help", "cmd=", "port=", "seed=", "dir=", "ip=", "threads=", "bitflip"]
     (opts,args) = getopt.getopt(sys.argv[2:], opt_short, opt_long)
 except:
     import traceback; traceback.print_exc() 
     usage()
 
+threads = 0
+port = 1337
+mutations = None
 for o,v in opts:
     if o in ("-h", "--help"):
         usage()
@@ -48,6 +53,10 @@ for o,v in opts:
         seed = os.path.basename(v)
     elif o in ("-d", "--dir"):
         workdir = v
+    elif o in ("-t", "--threads"):
+        threads = int(v)
+    elif o in ("--bitflip"):
+        mutations = [0,1]
     else:
         usage()
 
@@ -86,7 +95,7 @@ elif what == "work":
     workers = []
     for port in args:
         os.chdir(cwd)
-        w = worker(ip,int(port), "%s/%d" % (workdir, int(port)))
+        w = worker(ip,int(port), "%s/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
         w.provision()
         workers += [w]
 
