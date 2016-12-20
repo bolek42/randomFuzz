@@ -69,8 +69,6 @@ if what in ("fuzz-restore", "crash-fuzz"):
         seed = cfg["seed"]
         port = cfg["port"]
         
-
-
 if what in ("fuzz","fuzz-restore"):
     cfg = {}
     cfg["cmd"] = cmd
@@ -86,7 +84,10 @@ if what in ("fuzz","fuzz-restore"):
 
     files = args
     f = master( cmd, files, workdir, [])
-    f.add_mutator("data")
+
+    with open(seed, "rb") as x:
+        l = len(x.read())
+    f.add_mutator("data", l)
     f.fuzz(seed, port)
 
 elif what == "work":

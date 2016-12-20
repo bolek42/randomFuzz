@@ -82,9 +82,7 @@ class master:
 
     #TODO mutations
     def add_mutator(self, name, length=42):
-        mutator = {}
-        mutator["mutations"] = []
-        mutator["len"] = length #XXX dirty fix for missing length
+        mutator = self.mutator.get_mutator(length)
         self.initial_testcase["mutators"][name] = mutator
         
     def fuzz(self, seed, port=1337):
@@ -337,7 +335,7 @@ class master:
                     self.callback(self, testcase, dumpfile="crash-%d.bin" % len(self.crash_addr), execute=False)
 
                     #notify
-                    cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr))
+                    cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; cat crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr),  len(self.crash_addr))
                     os.system(cmd)
 
                     self.crash_addr += [crash]
@@ -404,8 +402,9 @@ class master:
         #fuzz crash
         while True:
             testcase = choice(self.crashes)
-            mutated = self.mutator.get_random_mutations(testcase , maximum=1)#, mutations=[3]) ##, start=711-16, stop=711+16)
-            mutated = self.mutator.get_random_mutations(testcase , maximum=1, mutations=[3], start=5137, stop=5337)
+            mutated = deepcopy(testcase)
+            mutated["mutators"]["data"] = self.mutator.get_random_mutations(testcase["mutators"]["data"] , maximum=1)#, mutations=[3]) ##, start=711-16, stop=711+16)
+            mutated["mutators"]["data"] = self.mutator.get_random_mutations(testcase["mutators"]["data"] , maximum=1, mutations=[3], start=0, stop=0)
             stderr, crash, bitsets = self.callback(self, mutated)
             self.crash_fuzz_process_crash(stderr, mutated)
 

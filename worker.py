@@ -141,19 +141,7 @@ class worker():
             i = 0
             #get report with most new_blocks from queue
             while self.testcase_report.qsize() > 0 and i < 10:
-                t = t0 = t_max = self.testcase_report.get()
-                self.testcase_report.put(t0)
-                while t != t0:
-                    t = self.testcase_report.get()
-                    self.testcase_report.put(t)
-                    if t["new_blocks"] > t_max["new_blocks"]:
-                        t_max = t
-
                 t = self.testcase_report.get()
-                while t != t_max:
-                    t = self.testcase_report.get()
-                    self.testcase_report.put(t)
-    
                 report["testcase_report"].append(t)
                 i += 1
 
@@ -240,6 +228,7 @@ class worker():
                     bitset = int(bitsets[s])
                     new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
 
+                testcase["new_blocks"] = new_blocks
                 if new_blocks >= reference["new_blocks"]:
                     ge = True
 
@@ -250,6 +239,7 @@ class worker():
                 else:
                     if "minimize" in  reference: del reference["minimize"]
                     testcase = reference
+
                 if "random-merge" not in testcase["description"] and len(testcase["mutators"]["data"]["mutations"]) > 0:
                     state = testcase["mutators"]["data"]["mutations"][-1]
                     testcase["description"] = ("offset=%d: " % state["offset"]) + state["description"] 
@@ -261,7 +251,7 @@ class worker():
                 return
 
             #mutation was unused
-            if not ge:
+            if ge:
                 #print "%d unused" % i
                 del testcase["minimize"]["reference"]
                 testcase["minimize"]["reference"] = deepcopy(testcase)
@@ -313,7 +303,8 @@ class worker():
             testcase = self.testcases[tid]
 
             #mutate
-            mutated = self.mutator.get_random_mutations(testcase ,maximum=8, mutations=self.mutations)
+            mutated = deepcopy(testcase)
+            mutated["mutators"]["data"] = self.mutator.get_random_mutations(testcase["mutators"]["data"] ,maximum=8, mutations=self.mutations)
             mutated["parent_id"] = tid
             yield mutated
 

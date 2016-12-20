@@ -27,6 +27,13 @@ class mutator(seeds):
         self.mutations.append( self.insert)
         self.mutations.append( self.insert_add)
 
+    def get_mutator(self, length):
+        mutator = {}
+        mutator["mutations"] = []
+        mutator["len"] = length
+        mutator["description"] = ""
+        return mutator
+
     def mutate_seed(self, mutator, data):
         mut = []
         for state in  mutator["mutations"]:
@@ -43,11 +50,8 @@ class mutator(seeds):
         mutator["mutations"] = mut
         return data
 
-    def get_random_mutations(self, testcase, maximum=4, mutations=None, start=0, stop=0):
-        mutated = deepcopy(testcase)
-        name = choice(mutated["mutators"].keys())
-        mutator = mutated["mutators"][name]
-
+    def get_random_mutations(self, mutator, maximum=4, mutations=None, start=0, stop=0):
+        mutated = deepcopy(mutator)
         description = ""
         for i in xrange(randrange(maximum)+1):
             if not mutations:
@@ -59,20 +63,14 @@ class mutator(seeds):
             state["mutation"] = m
 
             if stop-start <= 0:
-                state["offset"] = randrange(max(1, mutator["len"]-4))
+                state["offset"] = randrange(max(1, mutated["len"]-4))
             else:
                 state["offset"] = randrange(start, stop)
 
-            mutator["mutations"] += [state]
+            mutated["mutations"] += [state]
             description += ("offset=%d: " % state["offset"]) + state["description"] + "; "
 
-        mutated["mutators"][name] = mutator
-        mutated["description"] = "%s: %s" % (name, description[:-2])
-        for name2 in mutated["mutators"]:
-            if name == name2:
-                mutated["mutators"][name2]["altered"] = True
-            else:
-                mutated["mutators"][name2]["altered"] = False
+        mutated["description"] = description[:-2]
 
         return mutated
                 
@@ -111,7 +109,7 @@ class mutator(seeds):
         #rand
         if state is None:
             state = {"byteflip": {}}
-            n = state["byteflip"]["n"] = randrange(4)
+            n = state["byteflip"]["n"] = randrange(4)+1
             state["description"] = "byteflip %d" % n
             return state
 
@@ -284,11 +282,14 @@ class mutator(seeds):
             t = t[:offset-off] + struct.pack(tp, x & mask) + t[offset+l-off:]
             return t
 
-if __name__ == "__main__":
-    m = mutator([])
-    seed = "\x00"* 128
-    testcase = {"len": 128, "id": 0, "mutations": []}
 
+if __name__ == "__main__":
+    data = "\x00"* 128
+    m = mutator([])
+    mutator = m.get_mutator(len(data))
+
+    mutated = m.get_random_mutations(mutator)
+    mutated_data = m.mutate_seed(mutated, data)
     mut = m.get_random_mutations(testcase)
-    print hexlify( m.mutate_seed(mut, seed))
-    print mut
+
+    print hexlify(mutated_data)
