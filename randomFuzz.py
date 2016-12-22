@@ -92,26 +92,36 @@ if what in ("fuzz","fuzz-restore"):
 
 elif what == "work":
     #set up workers
-    cwd = os.getcwd()
-    workers = []
-    for port in args:
-        os.chdir(cwd)
-        w = worker(ip,int(port), "%s/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
-        w.provision()
-        workers += [w]
-
-    try:
-        while True:
-            for i in xrange(len(workers)):
-                print ">>> Working on worker %d <<<" % i
-                workers[i].run(10000)
-                workers[i].stop()
-            
-    except:
-        import traceback; traceback.print_exc()
-        for w in workers:
+    if len(args) == 1:
+        try:
+            w = worker(ip,int(port), "%s/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
+            w.provision()
+            w.run()
+        except:
             w.stop()
-        os.kill(os.getpid(), 9)
+            import traceback; traceback.print_exc()
+            os.kill(os.getpid(), 9)
+    else:
+        cwd = os.getcwd()
+        workers = []
+        for port in args:
+            os.chdir(cwd)
+            w = worker(ip,int(port), "%s/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
+            w.provision()
+            workers += [w]
+
+        try:
+            while True:
+                for i in xrange(len(workers)):
+                    print ">>> Working on worker %d <<<" % i
+                    workers[i].run(10000)
+                    workers[i].stop()
+            
+        except:
+            import traceback; traceback.print_exc()
+            for w in workers:
+                w.stop()
+            os.kill(os.getpid(), 9)
 
 elif what == "select-testcases":
     files = args

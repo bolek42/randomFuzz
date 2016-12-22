@@ -141,7 +141,19 @@ class worker():
             i = 0
             #get report with most new_blocks from queue
             while self.testcase_report.qsize() > 0 and i < 10:
+                t = t0 = t_max = self.testcase_report.get()
+                self.testcase_report.put(t0)
+                while t != t0:
+                    t = self.testcase_report.get()
+                    self.testcase_report.put(t)
+                    if t["new_blocks"] > t_max["new_blocks"]:
+                        t_max = t
+ 
                 t = self.testcase_report.get()
+                while t != t_max:
+                    t = self.testcase_report.get()
+                    self.testcase_report.put(t)
+
                 report["testcase_report"].append(t)
                 i += 1
 
@@ -196,6 +208,7 @@ class worker():
             testcase["crash"] = crash
             testcase["stderr"] = stderr
             self.testcase_report.put(testcase)
+            return
 
 
         #found new blocks, requeue to remove unused mutations
@@ -204,7 +217,6 @@ class worker():
             for s in bitsets:
                 bitset = int(bitsets[s])
                 new_blocks += (~self.bitsets[s]) & bitset
-                self.bitsets[s] |= bitset
 
             if new_blocks > 0:
                 #remove unused mutations
@@ -232,13 +244,16 @@ class worker():
                 if new_blocks >= reference["new_blocks"]:
                     ge = True
 
+            nb2 = 0
+            for s in reference["bitsets"]:
+                bitset = int(reference["bitsets"][s])
+                nb2 += bin((~self.bitsets[s]) & bitset).count("1")
             #done
             if i >= len(testcase["mutators"]["data"]["mutations"]) - 1:
-                if ge:
-                    del testcase["minimize"]
-                else:
-                    if "minimize" in  reference: del reference["minimize"]
+                if not ge:
                     testcase = reference
+
+                if "minimize" in  testcase: del testcase["minimize"]
 
                 if "random-merge" not in testcase["description"] and len(testcase["mutators"]["data"]["mutations"]) > 0:
                     state = testcase["mutators"]["data"]["mutations"][-1]
@@ -247,8 +262,13 @@ class worker():
                 print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
                 print "Mutations: %d" % len(testcase["mutators"]["data"]["mutations"]), 
                 print "Report Queue: %d" % self.testcase_report.qsize()
+                new_blocks = 0
+                for s in testcase["bitsets"]:
+                    bitset = int(testcase["bitsets"][s])
+                    new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
                 self.testcase_report.put(testcase)
                 return
+
 
             #mutation was unused
             if ge:
@@ -315,6 +335,8 @@ class worker():
 
         def get_mutations(parent_id, name, mutations=[]):
             for tid in self.testcases[parent_id]["childs"]:
+                if tid >= len(self.testcases):
+                    continue
                 t  = self.testcases[tid]
                 if t["parent_id"] == parent_id and t["id"] != parent_id:
                     for m in t["mutators"][name]["mutations"]:
@@ -345,8 +367,8 @@ class worker():
             self.watchDog = None
 
         for p in self.process_list:
-            print "killing", p
-            p.terminate()
+            print "killing", p.pid
+            os.kill(p.pid,9)
         self.process_list = []
         self.executed_testcases.value = 0
 

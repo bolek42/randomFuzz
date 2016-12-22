@@ -61,9 +61,8 @@ def parse_asan(pid, stderr):
     crash = False
     if "ERROR: AddressSanitizer:" in stderr:
         try:
-            errorline = re.findall( "ERROR\: AddressSanitizer: .*", stderr)[0]
-            crash = re.findall("pc 0x[0-9a-f]*", errorline)[0][3:]
-            errorline += ("#"*0x42)+"\n"+errorline+"\n"+("#"*0x42)
+            errorline = re.findall( "[ ]*#0 0x[0-9a-f]*[ ]*(.*\+0x[0-9a-f]*)", stderr)[0]
+            crash = re.findall("0x[0-9a-f]*", errorline)[0]
         except:
             crash = "0x42424242"
 

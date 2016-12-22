@@ -45,6 +45,7 @@ class master:
         self.bitsets = {}
         self.report_queue = Queue()
         self.update_queue = Queue()
+        self.connections = []
 
         #create workdir
         if not os.path.exists(workdir):
@@ -149,10 +150,10 @@ class master:
                 new_blocks += bin((~bitsets[s]) & b[s]).count("1")
                 bitsets[s] |= b[s]
 
-            if new_blocks > 0:
+            if new_blocks > 10:
                 tmp += [[fname, b, t, new_blocks]]
 
-        count = 10
+        count = 100
         while len(results) > count + 10:
             #sort results by new blocks
             results = []
@@ -166,7 +167,7 @@ class master:
                     new_blocks += bin((~bitsets[s]) & b[s]).count("1")
                     bitsets[s] |= b[s]
 
-                if new_blocks > 0:
+                if new_blocks > 10:
                     results += [[fname, b, t, new_blocks]]
                 #print "New blocks %d, time: %.4fs, file: %s" % (new_blocks, t, fname)
 
@@ -193,7 +194,12 @@ class master:
                     break
             self.log("Loaded %d testcases" % len(self.testcases))
             self.bitsets = load_json("bitsets.json")
-            self.crash_addr = load_json("crash_addr.json")
+            self.crash_addr = load_json("../crash_addr.json")
+            if len(self.testcases) > 0:
+                for s in self.bitsets:
+                    covered = bin(self.bitsets[s]).count("1")
+                    missing = bin(~self.bitsets[s]).count("0")
+                    self.log("%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing)))
         except:
             pass
 
@@ -207,6 +213,7 @@ class master:
         s.setblocking(1)
         while True:
             conn, addr = s.accept()
+            self.connections += [conn]
             Thread(target=self.connection_handler, args=(conn,)).start()
 
     def connection_handler(self, conn):
@@ -308,7 +315,7 @@ class master:
                     self.bitsets[s] |= bitset
 
             #append new testcase
-            if new_blocks > 1:
+            if new_blocks > 0:
                 testcase["new_blocks"] = new_blocks
                 testcase["blocks"] = blocks
                 testcase["id"] = len(self.testcases)
@@ -335,19 +342,20 @@ class master:
                     self.callback(self, testcase, dumpfile="crash-%d.bin" % len(self.crash_addr), execute=False)
 
                     #notify
-                    cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; cat crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr),  len(self.crash_addr))
+                    cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; base64 crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr),  len(self.crash_addr))
                     os.system(cmd)
 
                     self.crash_addr += [crash]
-                    save_json("crash_addr.json", self.crash_addr)
+                    save_json("../crash_addr.json", self.crash_addr)
 
-            if new_blocks > 1 or new_crash:
+            if new_blocks > 0 or new_crash:
                 self.update_queue.put( (testcase, self.bitsets, self.crash_addr, log))
             
     
     #ui
     def ui(self):
         n_old = start = stop = 0
+        log_old = ""
         while True:
             time.sleep(1)
             #determine testaces per second
@@ -379,6 +387,24 @@ class master:
             for message in self._log[-16:]:
                 print message
             print "%dd %02dh %02dm %02ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
+
+            if log_old != self._log[-1]:
+                last_event = time.time()
+                log_old = self._log[-1]
+
+            def die():
+                for c in self.connections:
+                    try:
+                        c.close()
+                    except:
+                        pass
+                os.kill(os.getpid(), 9)
+
+            if time.time() - last_event > 30 and len(self.testcases) == 0:
+                die()
+
+            if time.time() - last_event > 120:
+                die()
 
     def log(self, msg):
         t = time.time() - self.t0
