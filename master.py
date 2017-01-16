@@ -193,8 +193,8 @@ class master:
                 except:
                     break
             self.log("Loaded %d testcases" % len(self.testcases))
-            self.bitsets = load_json("bitsets.json")
             self.crash_addr = load_json("../crash_addr.json")
+            self.bitsets = load_json("bitsets.json")
             if len(self.testcases) > 0:
                 for s in self.bitsets:
                     covered = bin(self.bitsets[s]).count("1")
@@ -403,7 +403,7 @@ class master:
             if time.time() - last_event > 30 and len(self.testcases) == 0:
                 die()
 
-            if time.time() - last_event > 120:
+            if time.time() - last_event > 300:
                 die()
 
     def log(self, msg):

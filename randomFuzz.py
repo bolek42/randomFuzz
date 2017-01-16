@@ -65,7 +65,7 @@ if what in ("fuzz-restore", "crash-fuzz"):
     with open("%s/cfg.json" % workdir, "r") as f:
         cfg = json.loads(f.read())
         cmd = cfg["cmd"]
-        args = map(lambda x: "%s/%s" % (workdir, x), cfg["files"])
+        args = map(lambda x: "%s/%s" % (workdir, x), cfg["files"]+args)
         seed = cfg["seed"]
         port = cfg["port"]
         
@@ -130,9 +130,11 @@ elif what == "select-testcases":
     f.select_testcases()
 
 elif what == "crash-fuzz":
+    print cmd
     f = master(cmd, [], workdir, [])
     f.seed = seed
-    files = map(os.path.basename, args[:-1])
+    files = map(os.path.basename, args[1:])
+    print files
     f.crash_fuzz(files)
 
 else:

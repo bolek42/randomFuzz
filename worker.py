@@ -299,8 +299,9 @@ class worker():
 
             #initial and deterministic testcases
             try:
-                testcase = self.work_queue.get(False)
-                yield testcase
+                while True:
+                    testcase = self.work_queue.get(False)
+                    yield testcase
             except:
                 pass
 
