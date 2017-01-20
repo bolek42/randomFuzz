@@ -109,23 +109,30 @@ class master:
         os.kill(os.getpid(), 9)
 
 
-    #
     def select_testcases(self):
         os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1:symbolize=1"
         os.environ["LD_LIBRARY_PATH"]="."
 
+        self.executor = executor(self.cmd, self.workdir)
+
         #determine execution time for each file
         try:
             results = []
-            for fname in glob.glob("./*"):
-                start = time.time()
-                for i in xrange(1):
-                    cmd = (self.cmd % fname).split(" ")
+            for fname in glob.glob("*"):
+                with open(fname, "rb") as f:
+                    data = f.read()
 
-                    p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
-                    self.watchDog.start(p.pid, [])
-                    stdout, stderr = p.communicate(input="")
-                    _, b = parse_asan(p.pid, stderr)
+                data = self.executor.minimize(data)
+                with open("minimized-%s" % fname, "wb") as f:
+                    f.write(data)
+                fname = "minimized-%s" % fname
+
+                start = time.time()
+                try:
+                    for i in xrange(1):
+                        _,_,b = self.executor.call_sancov(data)
+                except:
+                    continue
 
                 hit, missed = 0, 1
                 for s in b:
@@ -134,14 +141,14 @@ class master:
                 
                 t = time.time() - start
                 print "%fs for %s (%d hit %.2f%%)" % (t, fname, hit, (hit*100.)/(hit+missed))
-                results += [(fname, b, t, 0)]
+                results += [(fname, b, t, len(data), 0)]
         except KeyboardInterrupt:
             pass
 
         #sort by execution time
         bitsets = {}
         tmp = []
-        for fname,b,t,_ in sorted(results, key=lambda x: x[2]):
+        for fname,b,t,l,_ in sorted(results, key=lambda x: x[3]):
             new_blocks = 0
             for s in b:
                 if s not in bitsets:
@@ -151,14 +158,14 @@ class master:
                 bitsets[s] |= b[s]
 
             if new_blocks > 10:
-                tmp += [[fname, b, t, new_blocks]]
+                tmp += [[fname, b, t, l, new_blocks]]
 
-        count = 100
+        count = 10
         while len(results) > count + 10:
             #sort results by new blocks
             results = []
             bitsets = {}
-            for fname, b, t, new_blocks in sorted(tmp, key=lambda x: x[3], reverse=True)[:-10]:
+            for fname, b, t, l, new_blocks in sorted(tmp, key=lambda x: x[4], reverse=True)[:-1]:
                 new_blocks = 0
                 for s in b:
                     if s not in bitsets:
@@ -168,17 +175,18 @@ class master:
                     bitsets[s] |= b[s]
 
                 if new_blocks > 10:
-                    results += [[fname, b, t, new_blocks]]
+                    results += [[fname, b, t, l, new_blocks]]
                 #print "New blocks %d, time: %.4fs, file: %s" % (new_blocks, t, fname)
 
             tmp = results
 
         i = 0
-        for fname, b, t, new_blocks in sorted(results, key=lambda x: x[3], reverse=True)[:count]:
-            print "New blocks %d, time: %.4fs, file: %s" % (new_blocks, t, fname)
+        for fname, b, t, l, new_blocks in sorted(results, key=lambda x: x[4], reverse=True)[:count]:
+            print "New blocks %d, time: %.4fs, len: %d: file: %s" % (new_blocks, t, l, fname)
             ext = fname.split(".")[-1]
             copy2(fname, "/tmp/seed-min-%d.%s" % (i,ext))
             i += 1
+
 
 
     def restore_state(self):

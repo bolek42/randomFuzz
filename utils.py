@@ -6,6 +6,7 @@ import os
 import json
 from random import getrandbits
 import re
+import sys
 
 #watchdog terminates processes after timeout
 #and delete left files
@@ -114,3 +115,51 @@ def callback_file(self, testcase, postprocess_callback=None, dumpfile=None, exec
 
     return stderr, crash, bitsets
 
+
+class executor:
+    def __init__(self, cmd, workdir):
+        self.watchDog = watchDog(workdir)
+        self.cmd = cmd
+
+    def call_sancov(self, data):
+        fname = hex(getrandbits(64))
+        with open( fname, "w") as f:
+            f.write(data)
+
+        cmd = (self.cmd % fname).split(" ")
+        p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
+        self.watchDog.start(p.pid, [fname])
+
+        stdout, stderr = p.communicate(input="")
+        crash, bitsets = parse_asan(p.pid, stderr)
+
+        return stderr, crash, bitsets
+
+    def minimize(self, data):
+        _,_,bitsets = self.call_sancov(data)
+
+        l = len(data)
+        blocksize = 2**(len(data)-1).bit_length()
+        while blocksize * 128 > len(data):
+            j = 0
+            while j < len(data):
+                sys.stderr.write("\rblocksize: %d len: %d/%d    " % (blocksize, len(data), l))
+                min_data = data[:j] + data[j+blocksize:]
+                _,_,b = self.call_sancov(min_data)
+                equal = True
+                try:
+                    for s in bitsets:
+                        if bin(bitsets[s]).count("1") > bin(b[s]).count("1"):
+                            equal = False
+                except:
+                    equal = False
+
+                if equal:
+                    data = min_data
+                else:
+                    j += blocksize
+
+            blocksize /= 2
+        sys.stderr.write("\n")
+
+        return data
