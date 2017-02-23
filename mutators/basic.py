@@ -3,10 +3,10 @@ from binascii import hexlify, unhexlify
 from copy import deepcopy
 import struct
 from seeds import seeds
-#
-class mutator(seeds):
-    def __init__(self, seed):
-        seeds.__init__(self, seed)
+
+class basic(seeds):
+    def __init__(self):
+        seeds.__init__(self, [])
 
         self.formats = [
             ("<I",0xffffffff, 4),
@@ -17,15 +17,15 @@ class mutator(seeds):
             ]
 
         self.mutations = []
-        self.mutations.append( self.bitflip)
-        self.mutations.append( self.byteflip)
-        self.mutations.append( self.arith)
-        self.mutations.append( self.arith_full)
-        self.mutations.append( self.duplicate)
-        self.mutations.append( self.delete)
-        self.mutations.append( self.replace)
-        self.mutations.append( self.insert)
-        self.mutations.append( self.insert_add)
+        self.mutations.append(self.bitflip)
+        self.mutations.append(self.byteflip)
+        self.mutations.append(self.arith)
+        self.mutations.append(self.arith_full)
+        self.mutations.append(self.duplicate)
+        self.mutations.append(self.delete)
+        self.mutations.append(self.replace)
+        self.mutations.append(self.insert)
+        self.mutations.append(self.insert_add)
 
     def get_mutator(self, length):
         mutator = {}
@@ -72,6 +72,38 @@ class mutator(seeds):
 
         mutated["description"] = description[:-2]
 
+        return mutated
+
+    def random_merge(self, tid):
+        #if tid == 0: return None
+        mutated = deepcopy(self.testcases[tid])
+
+        def get_mutations(parent_id, name, mutations=[]):
+            for tid in self.testcases[parent_id]["childs"]:
+                if tid >= len(self.testcases):
+                    continue
+                t  = self.testcases[tid]
+                if t["parent_id"] == parent_id and t["id"] != parent_id:
+                    for m in t["mutators"][name]["mutations"]:
+                        if m not in mutations:
+                            mutations += [m]
+                    mutations = get_mutations(tid, name, mutations)
+            return mutations
+
+        name = choice(mutated["mutators"].keys())
+        if tid not in self.random_merge_cache:
+            self.random_merge_cache[tid] = get_mutations(tid, name)
+
+            
+        mutations = self.random_merge_cache[tid]
+        if len(mutations) == 0:
+            return None
+
+        shuffle(mutations)
+        mutated["mutators"][name]["mutations"] += mutations[:randrange(min(10,len(mutations)))]
+        mutated["description"] = "%s: random-merge %d" % (name, tid)
+        mutated["parent_id"] = tid
+        
         return mutated
                 
 

@@ -2,16 +2,20 @@ import sys
 import os
 import getopt
 import json
+from shutil import copy2
 
+from utils import *
+from selector import selector
 from master import master
 from worker import worker
 
 _doc_="""
-randomFuzz.py fuzz              --cmd=cmd --dir=workdir --seed=seed --port=port files
-randomFuzz.py fuzz-restore      --dir=workdir
+randomFuzz.py init              --dir=workdir --cmd=cmd [files]
+randomFuzz.py select-testcases  --dir=testdir seed-dir1 seed-dir2 ...
+randomFuzz.py fuzz              --dir=workdir --port=port
+randomFuzz.py show-state        --dir=workdir
 randomFuzz.py work              --dir=workdir --ip=ip ports
 randomFuzz.py crash-fuzz        --dir=testdir crashes
-randomFuzz.py select-testcases  --cmd=cmd --dir=testdir  files
 
 args:
 \t-h, --help    this gelp
@@ -58,36 +62,49 @@ for o,v in opts:
     elif o in ("--bitflip"):
         mutations = [0,1]
     else:
+        print o,v
         usage()
 
-if what in ("fuzz-restore", "crash-fuzz"):
-    print "reolding config..."
-    with open("%s/cfg.json" % workdir, "r") as f:
-        cfg = json.loads(f.read())
-        cmd = cfg["cmd"]
-        args = map(lambda x: "%s/%s" % (workdir, x), cfg["files"]+args)
-        seed = cfg["seed"]
-        port = cfg["port"]
-        
-if what in ("fuzz","fuzz-restore"):
+#config handling
+if what == "init":
+    #create workdir
+    try:
+        os.makedirs(workdir)
+        os.makedirs("%s/seeds" % workdir)
+        os.makedirs("%s/files" % workdir)
+        os.makedirs("%s/run" % workdir)
+    except:
+        pass
+
+    for fname in args:
+        copy2(fname, "%s/files" % workdir)
+
     cfg = {}
     cfg["cmd"] = cmd
     cfg["files"] = map(os.path.basename, args)
-    cfg["seed"] = os.path.basename(seed)
-    cfg["port"] = port
+    cfg["env"] = {}
+    cfg["env"]["ASAN_OPTIONS"] = "coverage=1:coverage_bitset=1:symbolize=1"
+    cfg["env"]["MALLOC_CHECK_"] = "0"
+    cfg["env"]["PATH"] = "/home/hammel/asan-builds/bin/:/home/hammel/asan-builds/sbin/"
+    cfg["env"]["LD_LIBRARY_PATH"] = "/home/hammel/asan-builds/lib/"
 
-    if not os.path.exists(workdir):
-        os.makedirs(workdir)
+    save_json("%s/cfg.json" % workdir, cfg)
+    sys.exit(0)
+else:
+    cfg = load_json("%s/cfg.json" % workdir)
+    
+#commands
+if what == "select-testcases":
+    seeddirs = map(os.path.abspath, args)
+    s = selector(cfg, workdir)
+    s.select_testcases(seeddirs)
 
-    with open("%s/cfg.json" % workdir, "w") as f:
-        f.write(json.dumps(cfg))
-
-    files = args
+elif what == "fuzz":
+    files = map(os.path.abspath, args)
     f = master( cmd, files, workdir, [])
 
     with open(seed, "rb") as x:
         l = len(x.read())
-    f.add_mutator("data", l)
     f.fuzz(seed, port)
 
 elif what == "work":
@@ -123,12 +140,6 @@ elif what == "work":
                 w.stop()
             os.kill(os.getpid(), 9)
 
-elif what == "select-testcases":
-    files = args
-    f = master( cmd, files, workdir, [])
-    f.add_mutator("data")
-    f.select_testcases()
-
 elif what == "crash-fuzz":
     print cmd
     f = master(cmd, [], workdir, [])
@@ -137,6 +148,6 @@ elif what == "crash-fuzz":
     print files
     f.crash_fuzz(files)
 
-else:
+elif what != "init":
     usage()
 

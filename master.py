@@ -23,69 +23,42 @@ import struct
 import cloud
 from shutil import copy2
 from utils import *
-from mutator import mutator
 import glob
 import time
 from shutil import copy2
 
+from mutators import mutator
+
 class master:
-    def __init__(self, cmd=None, files=None, workdir=None, seeds=[], callback=None):
-        #fuzzing state
-        self.testcases = []
-        if not callback:
-            callback = callback_file
-        self.callback = callback
-        self.watchDog = watchDog(workdir)
-        self.mutator = mutator(seeds)
-        self.seeds = seeds
+    def __init__(self, cmd=None, env=None, files=None, workdir=None):
+        #misc
         self.connected_worker = Value('i', 0)
         self.workdir = workdir
-        self.cmd = cmd
-
-        self.bitsets = {}
+        self.rate = 0
+        self.connections = []
+        self._log = []
+        self.t0 = time.time()
         self.report_queue = Queue()
         self.update_queue = Queue()
-        self.connections = []
 
-        #create workdir
-        if not os.path.exists(workdir):
-            os.makedirs(workdir)
-
-        #copy file to workdir
-        self.files = []
-        for fname in files:
-            try:
-                copy2(fname, workdir)
-                os.chmod(fname, 0700)
-                self.files.append(os.path.basename(fname))
-            except:
-                print "error copy: %s" % fname
         os.chdir(workdir)
 
-        with open("cmd", "a") as f:
-            cmd =  map(lambda x: '"'+x+'"' if ' ' in x else x, sys.argv)
-            f.write(" ".join(cmd) + "\n")
-
-        self.crash_addr = [] #addresses of crashes
+        #global config
+        self.cmd = cmd
+        self.env = env
+        self.files = []
         self.crash_id = 0
+        if os.path.exists("crash_addr.json"):
+            self.crash_addr = load_json("crash_addr.json")
+        else:
+            self.crash_addr = []
 
-        self.rate = 0 #testcases per second
-        self._log = [] #new testcase messages
+        #fuzzing state
+        self.testcases = []
+        self.bitsets = {}
         self.total_testcases = 0
-        self.t0 = time.time()
 
-        self.initial_testcase = dict()
-        self.initial_testcase["id"] = 0
-        self.initial_testcase["parent_id"] = 0
-        self.initial_testcase["mutators"] = {}
-        self.initial_testcase["description"] = ""
-        self.initial_testcase["childs"] = []
 
-    #TODO mutations
-    def add_mutator(self, name, length=42):
-        mutator = self.mutator.get_mutator(length)
-        self.initial_testcase["mutators"][name] = mutator
-        
     def fuzz(self, seed, port=1337):
         try:
             self.restore_state()
@@ -108,88 +81,7 @@ class master:
             os.kill(os.getpid(), 9)
         os.kill(os.getpid(), 9)
 
-
-    def select_testcases(self):
-        os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1:symbolize=1"
-        os.environ["LD_LIBRARY_PATH"]="."
-
-        self.executor = executor(self.cmd, self.workdir)
-
-        #determine execution time for each file
-        try:
-            results = []
-            for fname in glob.glob("*"):
-                with open(fname, "rb") as f:
-                    data = f.read()
-
-                data = self.executor.minimize(data)
-                with open("minimized-%s" % fname, "wb") as f:
-                    f.write(data)
-                fname = "minimized-%s" % fname
-
-                start = time.time()
-                try:
-                    for i in xrange(1):
-                        _,_,b = self.executor.call_sancov(data)
-                except:
-                    continue
-
-                hit, missed = 0, 1
-                for s in b:
-                    hit += bin(b[s]).count("1")
-                    missed += bin(b[s]).count("0")
-                
-                t = time.time() - start
-                print "%fs for %s (%d hit %.2f%%)" % (t, fname, hit, (hit*100.)/(hit+missed))
-                results += [(fname, b, t, len(data), 0)]
-        except KeyboardInterrupt:
-            pass
-
-        #sort by execution time
-        bitsets = {}
-        tmp = []
-        for fname,b,t,l,_ in sorted(results, key=lambda x: x[3]):
-            new_blocks = 0
-            for s in b:
-                if s not in bitsets:
-                    bitsets[s] = 0
-
-                new_blocks += bin((~bitsets[s]) & b[s]).count("1")
-                bitsets[s] |= b[s]
-
-            if new_blocks > 10:
-                tmp += [[fname, b, t, l, new_blocks]]
-
-        count = 10
-        while len(results) > count + 10:
-            #sort results by new blocks
-            results = []
-            bitsets = {}
-            for fname, b, t, l, new_blocks in sorted(tmp, key=lambda x: x[4], reverse=True)[:-1]:
-                new_blocks = 0
-                for s in b:
-                    if s not in bitsets:
-                        bitsets[s] = 0
-
-                    new_blocks += bin((~bitsets[s]) & b[s]).count("1")
-                    bitsets[s] |= b[s]
-
-                if new_blocks > 10:
-                    results += [[fname, b, t, l, new_blocks]]
-                #print "New blocks %d, time: %.4fs, file: %s" % (new_blocks, t, fname)
-
-            tmp = results
-
-        i = 0
-        for fname, b, t, l, new_blocks in sorted(results, key=lambda x: x[4], reverse=True)[:count]:
-            print "New blocks %d, time: %.4fs, len: %d: file: %s" % (new_blocks, t, l, fname)
-            ext = fname.split(".")[-1]
-            copy2(fname, "/tmp/seed-min-%d.%s" % (i,ext))
-            i += 1
-
-
-
-    def restore_state(self):
+    def load_seed_state(self, seed):
         try:
             self.testcases = []
             i = 0
@@ -201,7 +93,6 @@ class master:
                 except:
                     break
             self.log("Loaded %d testcases" % len(self.testcases))
-            self.crash_addr = load_json("../crash_addr.json")
             self.bitsets = load_json("bitsets.json")
             if len(self.testcases) > 0:
                 for s in self.bitsets:
@@ -230,11 +121,8 @@ class master:
         provision = {}
         provision["cmd"] = self.cmd
         provision["seed"] = self.seed
-        provision["seeds"] = self.seeds
         provision["bitsets"] = self.bitsets
         provision["crash_addr"] = self.crash_addr
-        provision["callback"] = b64encode(cloud.serialization.cloudpickle.dumps(self.callback))
-        provision["initial_testcases"] = [self.initial_testcase]
 
         testcases = []
         for i in xrange(len(self.testcases)):
@@ -338,20 +226,16 @@ class master:
                 save_json("testcase-%d.json" % (pid),self.testcases[pid])
 
             #handle new crash
-            new_crash = False
             if "crash" in testcase:
                 crash = testcase["crash"]
-                crash = re.findall("0x[0-9a-f]*", crash)[0]
                 if crash not in self.crash_addr:
-                    new_crash = True
                     log.append("New Crash @ %s !!" % (crash))
                     save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
                     save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
-                    self.callback(self, testcase, dumpfile="crash-%d.bin" % len(self.crash_addr), execute=False)
 
                     #notify
-                    cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; base64 crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr),  len(self.crash_addr))
-                    os.system(cmd)
+                    #cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; base64 crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr),  len(self.crash_addr))
+                    #os.system(cmd)
 
                     self.crash_addr += [crash]
                     save_json("../crash_addr.json", self.crash_addr)
@@ -421,48 +305,3 @@ class master:
         with open("log", "a") as f:
             f.write("%s %s\n" % (timestamp, msg))
             
-    def crash_fuzz( self, files):
-        self.addrs = []
-        self.crashes = []
-
-        for fname in files:
-            with open(fname, "r") as f:
-                testcase = json.loads(f.read())
-                testcase["description"] = ""
-
-            stderr, crash, bitsets = self.callback(self, testcase)
-            self.crash_fuzz_process_crash(stderr, testcase)
-
-        #fuzz crash
-        while True:
-            testcase = choice(self.crashes)
-            mutated = deepcopy(testcase)
-            mutated["mutators"]["data"] = self.mutator.get_random_mutations(testcase["mutators"]["data"] , maximum=1)#, mutations=[3]) ##, start=711-16, stop=711+16)
-            mutated["mutators"]["data"] = self.mutator.get_random_mutations(testcase["mutators"]["data"] , maximum=1, mutations=[3], start=0, stop=0)
-            stderr, crash, bitsets = self.callback(self, mutated)
-            self.crash_fuzz_process_crash(stderr, mutated)
-
-    def crash_fuzz_process_crash(self, stderr, testcase):
-        for line in stderr.split("\n"):
-            if "ERROR: AddressSanitizer:" in line: 
-                try:
-                    addr = re.findall("on [a-z ]*address 0x[0-9a-f]*", line)[0]
-                    addr = re.findall("0x[0-9a-f]*", addr)[0]
-                    crash = re.findall("pc 0x[0-9a-f]*", line)[0]
-                    addr = "%s-%s" % (crash,addr)
-                    if addr not in self.addrs:
-                        if "READ" in stderr:
-                            cause = "READ"
-                        elif "WRITE" in stderr:
-                            cause = "WRITE"
-                        else:
-                            cause = "OTHER"
-
-                        stderr, crash, bitsets = self.callback(self, testcase, dumpfile="crashFuzz-%s-%s.bin" % (addr,cause))
-                        save_data("crashFuzz-%s-%s.stderr" % (addr, cause), stderr)
-                        print cause, addr, testcase["description"]
-                        self.addrs += [addr]
-                        self.crashes += [testcase]
-                except:
-                    #print stderr
-                    import traceback; traceback.print_exc()

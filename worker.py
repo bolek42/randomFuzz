@@ -10,42 +10,39 @@ from subprocess import Popen, PIPE, STDOUT
 import re
 import struct
 import pickle
-import glob
-from mutator import mutator
-from utils import *
 from copy import deepcopy
 from shutil import copy2
 
+from mutators import mutator
+from utils import *
+
 
 class worker():
-    def __init__(self, ip, port, workdir, n_threads=0, mutations=None):
-        os.environ["ASAN_OPTIONS"]="coverage=1:coverage_bitset=1:symbolize=1"
-        os.environ["MALLOC_CHECK_"]="0"
-        os.environ["LD_LIBRARY_PATH"]="."
-
-        self.ip = ip
-        self.port = port
-        self.workdir = os.path.abspath(workdir)
+    def __init__(self, workdir, n_threads=0, mutations=None):
         self.n_threads = cpu_count() if n_threads == 0 else n_threads
         self.process_list = []
+        self.workdir = workdir
+
+        #queue for testcases to be executed
+        self.work_queue = Queue()
+
+        #list of queues for worker updates
+        self.update_queues = []
+
+        #queues for test reports
+        self.testcase_report = Queue()
+
+
+
+    def connect(self, ip, port):
+        self.ip = ip
+        self.port = port
         self.mutations = mutations
-        self.random_merge_cache = {}
+        self.random_merge_cache = {} #XXX
 
         self.bitsets = {}
         self.testcases = []
         self.executed_testcases = Value('i', 0)
-
-        self.work_queue = Queue()
-        self.testcase_count = Queue()
-        self.update_queues = []
-
-        self.testcase_report = Queue()
-        self.watchDog = None
-
-        #create workdir
-        if not os.path.exists(self.workdir):
-            os.makedirs(self.workdir)
-
 
     def provision(self):
         print "connecting %s:%d" % (self.ip, self.port)
@@ -98,6 +95,8 @@ class worker():
         del provision
         print "privision done"
 
+
+
     def run(self, n_testcases=0):
         #prepare workdir
         os.chdir(self.workdir)
@@ -105,7 +104,6 @@ class worker():
             os.remove(fname)
 
         #start worker threads
-        self.watchDog = watchDog(self.workdir)
         sock = self.sock
         self.update_queues = []
         for i in xrange(self.n_threads):
@@ -329,49 +327,60 @@ class worker():
             mutated["parent_id"] = tid
             yield mutated
 
-    #to mutator
-    def random_merge(self, tid):
-        #if tid == 0: return None
-        mutated = deepcopy(self.testcases[tid])
-
-        def get_mutations(parent_id, name, mutations=[]):
-            for tid in self.testcases[parent_id]["childs"]:
-                if tid >= len(self.testcases):
-                    continue
-                t  = self.testcases[tid]
-                if t["parent_id"] == parent_id and t["id"] != parent_id:
-                    for m in t["mutators"][name]["mutations"]:
-                        if m not in mutations:
-                            mutations += [m]
-                    mutations = get_mutations(tid, name, mutations)
-            return mutations
-
-        name = choice(mutated["mutators"].keys())
-        if tid not in self.random_merge_cache:
-            self.random_merge_cache[tid] = get_mutations(tid, name)
-
-            
-        mutations = self.random_merge_cache[tid]
-        if len(mutations) == 0:
-            return None
-
-        shuffle(mutations)
-        mutated["mutators"][name]["mutations"] += mutations[:randrange(min(10,len(mutations)))]
-        mutated["description"] = "%s: random-merge %d" % (name, tid)
-        mutated["parent_id"] = tid
-        
-        return mutated
-
-    def stop(self):
-        if self.watchDog:
-            self.watchDog.exit()
-            self.watchDog = None
-
         for p in self.process_list:
             print "killing", p.pid
             os.kill(p.pid,9)
         self.process_list = []
         self.executed_testcases.value = 0
+
+
+
+    def crash_fuzz( self, files):
+        self.addrs = []
+        self.crashes = []
+
+        for fname in files:
+            with open(fname, "r") as f:
+                testcase = json.loads(f.read())
+                testcase["description"] = ""
+
+            stderr, crash, bitsets = self.callback(self, testcase)
+            self.crash_fuzz_process_crash(stderr, testcase)
+
+        #fuzz crash
+        while True:
+            testcase = choice(self.crashes)
+            mutated = deepcopy(testcase)
+            mutated["mutators"]["data"] = self.mutator.get_random_mutations(testcase["mutators"]["data"] , maximum=1)#, mutations=[3]) ##, start=711-16, stop=711+16)
+            mutated["mutators"]["data"] = self.mutator.get_random_mutations(testcase["mutators"]["data"] , maximum=1, mutations=[3], start=0, stop=0)
+            stderr, crash, bitsets = self.callback(self, mutated)
+            self.crash_fuzz_process_crash(stderr, mutated)
+
+    def crash_fuzz_process_crash(self, stderr, testcase):
+        for line in stderr.split("\n"):
+            if "ERROR: AddressSanitizer:" in line: 
+                try:
+                    addr = re.findall("on [a-z ]*address 0x[0-9a-f]*", line)[0]
+                    addr = re.findall("0x[0-9a-f]*", addr)[0]
+                    crash = re.findall("pc 0x[0-9a-f]*", line)[0]
+                    addr = "%s-%s" % (crash,addr)
+                    if addr not in self.addrs:
+                        if "READ" in stderr:
+                            cause = "READ"
+                        elif "WRITE" in stderr:
+                            cause = "WRITE"
+                        else:
+                            cause = "OTHER"
+
+                        stderr, crash, bitsets = self.callback(self, testcase, dumpfile="crashFuzz-%s-%s.bin" % (addr,cause))
+                        save_data("crashFuzz-%s-%s.stderr" % (addr, cause), stderr)
+                        print cause, addr, testcase["description"]
+                        self.addrs += [addr]
+                        self.crashes += [testcase]
+                except:
+                    #print stderr
+                    import traceback; traceback.print_exc()
+            i += 1
 
 
 if __name__ == "__main__":
