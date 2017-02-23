@@ -90,38 +90,36 @@ if what == "init":
     cfg["env"]["LD_LIBRARY_PATH"] = "/home/hammel/asan-builds/lib/"
 
     save_json("%s/cfg.json" % workdir, cfg)
-    sys.exit(0)
-else:
-    cfg = load_json("%s/cfg.json" % workdir)
     
-#commands
-if what == "select-testcases":
+elif what == "select-testcases":
+    cfg = load_json("%s/cfg.json" % workdir)
     seeddirs = map(os.path.abspath, args)
     s = selector(cfg, workdir)
     s.select_testcases(seeddirs)
 
 elif what == "fuzz":
+    cfg = load_json("%s/cfg.json" % workdir)
     f = master(cfg, workdir, port)
     for seed in glob.glob("seeds/*"):
         f.fuzz(seed)
 
 elif what == "work":
-    #set up workers
+    #set up worker
     if len(args) == 1:
         try:
-            w = worker(ip,int(port), "%s/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
-            w.provision()
+            w = worker("%s/run/%d" % (workdir, int(port)), n_threads=threads)
+            w.connect(ip,int(port))
             w.run()
         except:
-            w.stop()
             import traceback; traceback.print_exc()
+            w.stop()
             os.kill(os.getpid(), 9)
     else:
         cwd = os.getcwd()
         workers = []
         for port in args:
             os.chdir(cwd)
-            w = worker(ip,int(port), "%s/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
+            w = worker(ip,int(port), "%s/run/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
             w.provision()
             workers += [w]
 

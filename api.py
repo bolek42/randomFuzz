@@ -1,6 +1,8 @@
 import socket
 import json
 import struct
+import os
+import time
 from threading import Thread
 from multiprocessing import Process,Queue,Value
 from base64 import b64encode, b64decode
@@ -9,17 +11,17 @@ class api:
     def __init__(self):
         pass
 
-    def recv(self, conn):
+    def recv(self, s):
         n = struct.unpack('<I',s.recv(4))[0]
         d = ""
         while len(d) < n:
             d += s.recv(n-len(d))
         return json.loads(d)
 
-    def send(self, conn, data):
+    def send(self, s, data):
         j = json.dumps(data)
-        conn.sendall(struct.pack('<I',len(j)))
-        conn.sendall(j)
+        s.sendall(struct.pack('<I',len(j)))
+        s.sendall(j)
 
     #server
     def accept(self, port):
@@ -42,10 +44,13 @@ class api:
         provision = {}
         provision["cmd"] = self.cmd
         provision["env"] = self.env
-        provision["seed"] = self.seed
+        provision["seed"] = os.path.basename(self.seed)
         provision["ext"] = self.ext
         provision["coverage"] = self.coverage
         provision["crash"] = self.crash
+
+        with open("seeds/" + self.seed, "r") as f:
+            provision["seed_data"] = b64encode(f.read())
 
         #add known testcases
         testcases = []
@@ -91,14 +96,19 @@ class api:
             for testcase in report["testcase_report"]:
                 self.report_queue.put(testcase)
 
+            time.sleep(1)
+
         conn.close()
         self.connected_worker.value -= 1
 
     def api_stop(self):
         self.sock.close()
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(("127.0.0.1", self.port))
-        s.close()
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(("127.0.0.1", self.port))
+            s.close()
+        except:
+            pass
         for c in self.connections:
             try:
                 c.close()
@@ -108,18 +118,23 @@ class api:
     #client
     def connect(self, ip, port):
         #set up socket
-        print "connecting %s:%d" % (self.ip, self.port)
+        print "connecting %s:%d" % (ip, port)
+        self.ip = ip
+        self.port = port
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(100000)
+        s.settimeout(100)
         s.connect((self.ip, self.port))
         self.sock = s
         provision = self.recv(s)
+        print json.dumps(provision, indent=4)
 
         #generic
         self.cmd = provision["cmd"]
         self.coverage = provision["coverage"]
         self.crash = provision["crash"]
         self.ext = provision["ext"]
+        self.seed = provision["seed"]
+        self.seed_data = provision["seed_data"]
         for k in provision["env"]:
             os.environ[k] = provision["env"][k]
 
@@ -146,3 +161,47 @@ class api:
         #cleanup
         del provision
         print "privision done"
+
+    def client(self, n_testcases):
+        executed_testcases_old = 0
+        while self.executed_testcases.value < n_testcases or n_testcases == 0:
+            #wait for updates
+            update = self.recv(self.sock)
+            self.apply_update(update)
+            for queue in self.update_queues:
+                queue.put(update)
+
+            if len(update["testcase_update"]) > 0:
+                print "Got %d new Testcases %d Total; Coverage:" % (len(update["testcase_update"]), len(self.testcases)),
+                for s in self.coverage:
+                    covered = bin(self.coverage[s]).count("1")
+                    missing = bin(~self.coverage[s]).count("0")
+                    print "%s: %d" % (s,covered),
+                print "\n",
+
+            #report
+            report = {}
+            report["testcase_report"] = []
+            i = 0
+            #get report with most new_blocks from queue
+            while self.testcase_report.qsize() > 0 and i < 10:
+                t = t0 = t_max = self.testcase_report.get()
+                self.testcase_report.put(t0)
+                while t != t0:
+                    t = self.testcase_report.get()
+                    self.testcase_report.put(t)
+                    if t["new_blocks"] > t_max["new_blocks"]:
+                        t_max = t
+ 
+                t = self.testcase_report.get()
+                while t != t_max:
+                    t = self.testcase_report.get()
+                    self.testcase_report.put(t)
+
+                report["testcase_report"].append(t)
+                i += 1
+
+            report["executed_testcases"] = self.executed_testcases.value - executed_testcases_old
+            executed_testcases_old =  self.executed_testcases.value
+                
+            self.send(self.sock, report)

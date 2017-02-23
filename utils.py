@@ -100,7 +100,7 @@ class executor:
             elif "WRITE" in stderr:
                 cause = re.findall("WRITE of size [0-9]*", stderr)[0]
 
-        crash = "%s-%s" % (crash, cause)
+            crash = "%s-%s" % (crash, cause)
 
         return crash, bitsets
 

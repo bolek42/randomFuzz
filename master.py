@@ -73,12 +73,12 @@ class master(api):
 
 
     def load_seed_state(self, seed):
-        self.seed = seed
+        self.seed = os.path.basename(seed)
         self.ext = seed.split(".")[-1]
 
         #seed state directory
-        if not os.path.exists(seed):
-            os.makedirs(seed)
+        if not os.path.exists(self.seed):
+            os.makedirs(self.seed)
 
         #load testcases
         self.testcases = []
@@ -90,8 +90,8 @@ class master(api):
         self.log("Loaded %d testcases for %s" % (len(self.testcases), seed))
 
         #load status
-        if os.path.exists("%s/status.json" % seed):
-            status = load_json("%s/status.json" % seed)
+        if os.path.exists("%s/status.json" % self.seed):
+            status = load_json("%s/status.json" % self.seed)
             self.t0 = time.time() - cfg["execution_time"]
             self.coverage = status["coverage"]
             self.total_testcases = status["total_testcases"]
@@ -107,10 +107,11 @@ class master(api):
                 self.log("%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing)))
 
     def save_status(self):
+        status = {}
         status["coverage"] = self.coverage
         status["execution_time"] = time.time() - self.t0
         status["total_testcases"] = self.total_testcases
-        save_json("status.json", status)
+        save_json("%s/status.json" % self.seed, status)
 
 
     def apply_update(self):
@@ -155,22 +156,24 @@ class master(api):
 
                 pid = testcase["parent_id"]
                 self.testcases[pid]["childs"] += [testcase["id"]]
-                save_json("testcase-%d.json" % (pid),self.testcases[pid])
+                save_json("%s/testcase-%d.json" % (self.seed, pid),self.testcases[pid])
 
             #handle new crash
+            new_crash = False
             if "crash" in testcase:
                 crash = testcase["crash"]
                 if crash not in self.crash:
                     log.append("New Crash @ %s !!" % (crash))
-                    save_json("crash-%d.json" % (len(self.crash)),testcase)
-                    save_data("crash-%d.stderr" % (len(self.crash)),testcase["stderr"])
+                    save_json("crash/crash-%d.json" % (len(self.crash)),testcase)
+                    save_data("crash/crash-%d.stderr" % (len(self.crash)),testcase["stderr"])
+                    new_crash = True
 
                     #notify
                     #cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; base64 crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash),  len(self.crash))
                     #os.system(cmd)
 
                     self.crash += [crash]
-                    save_json("../crash.json", self.crash)
+                    save_json("crash.json", self.crash)
 
             if new_blocks > 0 or new_crash:
                 self.update_queue.put( (testcase, self.coverage, self.crash, log))

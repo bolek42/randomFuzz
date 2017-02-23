@@ -27,31 +27,24 @@ class basic(seeds):
         self.mutations.append(self.insert)
         self.mutations.append(self.insert_add)
 
-    def get_mutator(self, length):
-        mutator = {}
-        mutator["mutations"] = []
-        mutator["len"] = length
-        mutator["description"] = ""
-        return mutator
-
-    def mutate_seed(self, mutator, data):
+    def mutate_seed(self, testcase, data):
         mut = []
-        for state in  mutator["mutations"]:
+        for state in  testcase["mutations"]:
             m = state["mutation"]
             try:
                 data = self.mutations[m](state=state, data=data)
                 mut += [state]
-                mutator["description"] = state["description"]
+                testcase["description"] = testcase["description"]
             except:
                 #import traceback; traceback.print_exc()
                 pass
 
-        mutator["len"] = len(data)
-        mutator["mutations"] = mut
+        testcase["len"] = len(data)
+        testcase["mutations"] = mut
         return data
 
-    def get_random_mutations(self, mutator, maximum=4, mutations=None, start=0, stop=0):
-        mutated = deepcopy(mutator)
+    def random_mutation(self, testcase, maximum=4, mutations=None, start=0, stop=0):
+        mutated = deepcopy(testcase)
         description = ""
         for i in xrange(randrange(maximum)+1):
             if not mutations:
@@ -74,37 +67,6 @@ class basic(seeds):
 
         return mutated
 
-    def random_merge(self, tid):
-        #if tid == 0: return None
-        mutated = deepcopy(self.testcases[tid])
-
-        def get_mutations(parent_id, name, mutations=[]):
-            for tid in self.testcases[parent_id]["childs"]:
-                if tid >= len(self.testcases):
-                    continue
-                t  = self.testcases[tid]
-                if t["parent_id"] == parent_id and t["id"] != parent_id:
-                    for m in t["mutators"][name]["mutations"]:
-                        if m not in mutations:
-                            mutations += [m]
-                    mutations = get_mutations(tid, name, mutations)
-            return mutations
-
-        name = choice(mutated["mutators"].keys())
-        if tid not in self.random_merge_cache:
-            self.random_merge_cache[tid] = get_mutations(tid, name)
-
-            
-        mutations = self.random_merge_cache[tid]
-        if len(mutations) == 0:
-            return None
-
-        shuffle(mutations)
-        mutated["mutators"][name]["mutations"] += mutations[:randrange(min(10,len(mutations)))]
-        mutated["description"] = "%s: random-merge %d" % (name, tid)
-        mutated["parent_id"] = tid
-        
-        return mutated
                 
 
     #     _        _             
