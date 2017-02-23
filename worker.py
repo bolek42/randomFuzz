@@ -15,87 +15,26 @@ from shutil import copy2
 
 from mutators import mutator
 from utils import *
+from api import api
 
 
-class worker():
-    def __init__(self, workdir, n_threads=0, mutations=None):
+class worker(api):
+    def __init__(self, ip, port, workdir, n_threads=0):
+        self.ip = ip
+        self.port = port
         self.n_threads = cpu_count() if n_threads == 0 else n_threads
         self.process_list = []
         self.workdir = workdir
 
-        #queue for testcases to be executed
         self.work_queue = Queue()
-
-        #list of queues for worker updates
         self.update_queues = []
-
-        #queues for test reports
         self.testcase_report = Queue()
 
-
-
-    def connect(self, ip, port):
-        self.ip = ip
-        self.port = port
-        self.mutations = mutations
         self.random_merge_cache = {} #XXX
 
         self.bitsets = {}
         self.testcases = []
         self.executed_testcases = Value('i', 0)
-
-    def provision(self):
-        print "connecting %s:%d" % (self.ip, self.port)
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(100000)
-        s.connect((self.ip, self.port))
-        self.sock = s
-
-        #get provision json
-        n = struct.unpack('<I',s.recv(4))[0]
-        d = ""
-        while len(d) < n:
-            d += s.recv(n-len(d))
-        provision = json.loads(d)
-        del d
-
-        #generic
-        self.cmd = provision["cmd"]
-        self.bitsets = provision["bitsets"]
-        self.crash_addr = provision["crash_addr"]
-        self.seed = provision["seed"]
-        self.mutator = mutator(provision["seeds"])
-        self.callback = pickle.loads(b64decode(provision["callback"]))
-
-        for t in json.loads(b64decode(provision["testcases"])):
-            self.testcases += [json.loads(b64decode(t))]
-
-        #write Files to Disk
-        os.chdir(self.workdir)
-        for fname, data in provision["files"].iteritems():
-            try:
-                print "received %s %dkB" % (fname, len(data)/1024)
-                f = open(fname, "w")
-                f.write(b64decode(data))
-                f.close()
-                os.chmod(fname, 0700)
-            except:
-                import traceback; traceback.print_exc()
-
-        #prepare workdir
-        for fname in glob.glob("*sancov"):
-            os.remove(fname)
-
-        #fetch initial testcases
-        print "Got %d initial testcases" % len(provision["initial_testcases"])
-        for testcase in provision["initial_testcases"]:
-            self.work_queue.put(testcase)
-
-        #cleanup
-        del provision
-        print "privision done"
-
-
 
     def run(self, n_testcases=0):
         #prepare workdir

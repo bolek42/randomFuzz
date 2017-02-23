@@ -1,192 +1,124 @@
 #!/usr/bin/env python2
 import os
-import pickle
 import sys
-from multiprocessing import Process,Queue,Value
-from random import getrandbits, shuffle, choice, randrange
 import time
 import socket
 import json
-from base64 import b64encode, b64decode
-from threading import Thread
-from copy import deepcopy
-import zlib
-import struct
-import cloud
-import md5
-import re
-from Queue import PriorityQueue
-import socket
-import json
-from base64 import b64encode, b64decode
-import struct
-import cloud
-from shutil import copy2
-from utils import *
 import glob
-import time
+from multiprocessing import Process,Queue,Value
+from threading import Thread
+from Queue import PriorityQueue
+from copy import deepcopy
+from random import getrandbits, shuffle, choice, randrange
 from shutil import copy2
 
-from mutators import mutator
+from utils import *
+from api import api
 
-class master:
-    def __init__(self, cmd=None, env=None, files=None, workdir=None):
+class master(api):
+    def __init__(self, cfg, workdir, port):
         #misc
-        self.connected_worker = Value('i', 0)
-        self.workdir = workdir
         self.rate = 0
         self.connections = []
         self._log = []
-        self.t0 = time.time()
         self.report_queue = Queue()
         self.update_queue = Queue()
-
+        self.workdir = workdir
         os.chdir(workdir)
+        self.port = port
+        self.connected_worker = Value('i', 0)
 
         #global config
-        self.cmd = cmd
-        self.env = env
+        self.cmd = cfg["cmd"]
+        self.env = cfg["env"]
         self.files = []
         self.crash_id = 0
-        if os.path.exists("crash_addr.json"):
-            self.crash_addr = load_json("crash_addr.json")
+        if os.path.exists("crash.json"):
+            self.crash = load_json("crash.json")
         else:
-            self.crash_addr = []
+            self.crash = []
 
         #fuzzing state
         self.testcases = []
-        self.bitsets = {}
+        self.coverage = {}
+        self.t0 = time.time()
         self.total_testcases = 0
+        self.seed = ""
 
-
-    def fuzz(self, seed, port=1337):
-        try:
-            self.restore_state()
-            pass
-        except:
-            pass
-            import traceback; traceback.print_exc()
-
-        #start listener
-        self.port = port
-        self.seed = seed
+        #start threads
+        self.log("fuzzer started")
         Thread(target=self.ui).start()
         Thread(target=self.apply_update).start()
-        Process(target=self.process_report).start()
 
-        try:
-            self.accept()
-        except KeyboardInterrupt:
-            import traceback; traceback.print_exc()
-            os.kill(os.getpid(), 9)
-        os.kill(os.getpid(), 9)
 
-    def load_seed_state(self, seed):
+    def fuzz(self, seed):
+        self.load_seed_state(seed)
+
+        #this may consume much workload, so it is started as a new process
+        self.p_process_preort = Process(target=self.process_report)
+        self.p_process_preort.start()
+
+        #wait for connections
         try:
-            self.testcases = []
-            i = 0
-            while True:
-                try:
-                    t = load_json("testcase-%d.json" % i)
-                    self.testcases.append(t)
-                    i += 1
-                except:
-                    break
-            self.log("Loaded %d testcases" % len(self.testcases))
-            self.bitsets = load_json("bitsets.json")
-            if len(self.testcases) > 0:
-                for s in self.bitsets:
-                    covered = bin(self.bitsets[s]).count("1")
-                    missing = bin(~self.bitsets[s]).count("0")
-                    self.log("%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing)))
-        except:
+            self.accept(self.port)
+        except socket.error:
             pass
 
-    #network
-    def accept(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.settimeout(100000)
-        s.bind(("0.0.0.0", self.port))
-        s.listen(1)
-        s.setblocking(1)
-        while True:
-            conn, addr = s.accept()
-            self.connections += [conn]
-            Thread(target=self.connection_handler, args=(conn,)).start()
+    def stop(self):
+        self.log("stop")
+        self.api_stop()
+        os.kill(self.p_process_preort.pid, 9)
+        self.report_queue = Queue()
+        self.update_queue = Queue()
 
-    def connection_handler(self, conn):
-        print "worker connected"
-        self.connected_worker.value += 1
-        provision = {}
-        provision["cmd"] = self.cmd
-        provision["seed"] = self.seed
-        provision["bitsets"] = self.bitsets
-        provision["crash_addr"] = self.crash_addr
 
-        testcases = []
-        for i in xrange(len(self.testcases)):
-            with open("testcase-%d.json" % i, "r") as f:
-                testcases += [b64encode(f.read())]
+    def load_seed_state(self, seed):
+        self.seed = seed
+        self.ext = seed.split(".")[-1]
 
-        provision["testcases"] = b64encode(json.dumps(testcases))
+        #seed state directory
+        if not os.path.exists(seed):
+            os.makedirs(seed)
 
-        provision["files"] = {}
-        for fname in self.files:
-            f = open(fname, "rb")
-            provision["files"][fname] = b64encode(f.read())
-            f.close()
+        #load testcases
+        self.testcases = []
+        i = 0
+        while os.path.exists("%s/testcase-%d.json" % (seed,i)):
+            t = load_json("%s/testcase-%d.json" % (seed, i))
+            self.testcases.append(t)
+            i += 1
+        self.log("Loaded %d testcases for %s" % (len(self.testcases), seed))
 
-        try:
-            s = json.dumps(provision)
-            last_tid = len(self.testcases)
-            conn.sendall(struct.pack('<I',len(s)))
-            conn.sendall(s)
-            del provision
-            del s
-            print "worker provisioned"
+        #load status
+        if os.path.exists("%s/status.json" % seed):
+            status = load_json("%s/status.json" % seed)
+            self.t0 = time.time() - cfg["execution_time"]
+            self.coverage = status["coverage"]
+            self.total_testcases = status["total_testcases"]
+        else:
+            self.t0 = time.time()
+            self.coverage = {}
+            self.total_testcases
 
-            while True:
-                #send update
-                update = {}
-                update["testcase_update"] = self.testcases[last_tid:]
-                last_tid = len(self.testcases)
+        if len(self.testcases) > 0:
+            for s in self.coverage:
+                covered = bin(self.coverage[s]).count("1")
+                missing = bin(~self.coverage[s]).count("0")
+                self.log("%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing)))
 
-                update["bitset_update"] = {}
-                if len(update["testcase_update"]) > 0:
-                    update["bitset_update"] = self.bitsets
+    def save_status(self):
+        status["coverage"] = self.coverage
+        status["execution_time"] = time.time() - self.t0
+        status["total_testcases"] = self.total_testcases
+        save_json("status.json", status)
 
-                update["crash_addr"] = self.crash_addr
-
-                s = json.dumps(update)
-                conn.send(struct.pack('<I',len(s)))
-                conn.send(s)
-
-                #process updates
-                n = struct.unpack('<I',conn.recv(4))[0]
-                d = ""
-                while len(d) < n:
-                    d += conn.recv(n-len(d))
-                report = json.loads(d)
-                self.total_testcases += report["executed_testcases"]
-
-                for testcase in report["testcase_report"]:
-                    self.report_queue.put(testcase)
-
-                time.sleep(1)
-
-        except:
-            import traceback; traceback.print_exc()
-            conn.close()
-            self.connected_worker.value -= 1
-            return
 
     def apply_update(self):
         while True:
-            testcase, bitsets, crash_addr, log = self.update_queue.get()
+            testcase, coverage, crash, log = self.update_queue.get()
             self.testcases.append(testcase)
-            self.bitsets = bitsets
-            self.crash_addr = crash_addr
+            self.coverage = coverage
+            self.crash = crash
             for l in log:
                 self.log(l)
 
@@ -196,19 +128,19 @@ class master:
             testcase = self.report_queue.get()
             log = []
 
-            #update bitsets if not crashed
-            if "bitsets" in testcase:
-                bitsets = testcase["bitsets"]
+            #update coverage if not crashed
+            if "coverage" in testcase:
+                coverage = testcase["coverage"]
 
-                for s in bitsets:
-                    if s not in self.bitsets: self.bitsets[s] = 0
+                for s in coverage:
+                    if s not in self.coverage: self.coverage[s] = 0
                 new_blocks = 0
                 blocks = 0
-                for s in bitsets:
-                    bitset = int(bitsets[s])
+                for s in coverage:
+                    bitset = int(coverage[s])
                     blocks += bin(bitset).count("1")
-                    new_blocks += bin((~self.bitsets[s]) & bitset).count("1")
-                    self.bitsets[s] |= bitset
+                    new_blocks += bin((~self.coverage[s]) & bitset).count("1")
+                    self.coverage[s] |= bitset
 
             #append new testcase
             if new_blocks > 0:
@@ -219,7 +151,7 @@ class master:
                 log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
                 save_json("testcase-%d.json" % (len(self.testcases)),testcase)
                 self.testcases.append(testcase)
-                save_json("bitsets.json", self.bitsets)
+                self.save_status()
 
                 pid = testcase["parent_id"]
                 self.testcases[pid]["childs"] += [testcase["id"]]
@@ -228,20 +160,20 @@ class master:
             #handle new crash
             if "crash" in testcase:
                 crash = testcase["crash"]
-                if crash not in self.crash_addr:
+                if crash not in self.crash:
                     log.append("New Crash @ %s !!" % (crash))
-                    save_json("crash-%d.json" % (len(self.crash_addr)),testcase)
-                    save_data("crash-%d.stderr" % (len(self.crash_addr)),testcase["stderr"])
+                    save_json("crash-%d.json" % (len(self.crash)),testcase)
+                    save_data("crash-%d.stderr" % (len(self.crash)),testcase["stderr"])
 
                     #notify
-                    #cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; base64 crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash_addr),  len(self.crash_addr))
+                    #cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; base64 crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash),  len(self.crash))
                     #os.system(cmd)
 
-                    self.crash_addr += [crash]
-                    save_json("../crash_addr.json", self.crash_addr)
+                    self.crash += [crash]
+                    save_json("../crash.json", self.crash)
 
             if new_blocks > 0 or new_crash:
-                self.update_queue.put( (testcase, self.bitsets, self.crash_addr, log))
+                self.update_queue.put( (testcase, self.coverage, self.crash, log))
             
     
     #ui
@@ -264,43 +196,38 @@ class master:
             print "Testcases: %d" % (len(self.testcases))
             print "Rate: %.2f/s" % self.rate
             print "Total testcases: %d" % self.total_testcases
-            print "Crash: %d" % len(self.crash_addr)
+            print "Crash: %d" % len(self.crash)
             print "Worker: %d" % self.connected_worker.value
             print "Report Queue: %d" % self.report_queue.qsize()
             t = time.time() - self.t0
-            print "Time: %dd:%dh:%dm:%ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
+            print "Time: %dd:%dh:%dm:%ds" %((t/3600/24), (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"
-            for s in self.bitsets:
-                covered = bin(self.bitsets[s]).count("1")
-                missing = bin(~self.bitsets[s]).count("0")
+            for s in self.coverage:
+                covered = bin(self.coverage[s]).count("1")
+                missing = bin(~self.coverage[s]).count("0")
                 print "%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing))
 
             print "\nLog:"
             for message in self._log[-16:]:
                 print message
-            print "%dd %02dh %02dm %02ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
+            t = time.time()
+            print "%dd %02dh %02dm %02ds" %((t/3600/24)%365, (t/3600)%60, (t/60)%60, t%60)
 
             if log_old != self._log[-1]:
                 last_event = time.time()
                 log_old = self._log[-1]
 
-            def die():
-                for c in self.connections:
-                    try:
-                        c.close()
-                    except:
-                        pass
-                os.kill(os.getpid(), 9)
-
             if time.time() - last_event > 30 and len(self.testcases) == 0:
-                die()
+                last_event = time.time()
+                self.stop()
 
             if time.time() - last_event > 300:
-                die()
+                last_event = time.time()
+                self.stop()
 
     def log(self, msg):
-        t = time.time() - self.t0
-        timestamp =  "%dd %02dh %02dm %02ds" %((t/3600/24)%60, (t/3600)%60, (t/60)%60, t%60)
+        t = time.time() 
+        timestamp =  "%dd %02dh %02dm %02ds" %((t/3600/24)%365, (t/3600)%60, (t/60)%60, t%60)
         self._log.append("%s %s" % (timestamp, msg))
         with open("log", "a") as f:
             f.write("%s %s\n" % (timestamp, msg))

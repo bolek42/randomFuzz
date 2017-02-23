@@ -58,8 +58,8 @@ class executor:
         self.watchDog = watchDog()
         self.cmd = cmd
 
-    def call_sancov(self, data):
-        fname = hex(getrandbits(64))
+    def call_sancov(self, data, ext):
+        fname = "t-%016x.%s" % (getrandbits(64), ext)
         with open( fname, "w") as f:
             f.write(data)
 

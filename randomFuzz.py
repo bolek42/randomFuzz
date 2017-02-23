@@ -9,7 +9,7 @@ from selector import selector
 from master import master
 from worker import worker
 
-_doc_="""
+_doc_="""-=randomFuzz=-
 randomFuzz.py init              --dir=workdir --cmd=cmd [files]
 randomFuzz.py select-testcases  --dir=testdir seed-dir1 seed-dir2 ...
 randomFuzz.py fuzz              --dir=workdir --port=port
@@ -73,6 +73,7 @@ if what == "init":
         os.makedirs("%s/seeds" % workdir)
         os.makedirs("%s/files" % workdir)
         os.makedirs("%s/run" % workdir)
+        os.makedirs("%s/crash" % workdir)
     except:
         pass
 
@@ -100,12 +101,9 @@ if what == "select-testcases":
     s.select_testcases(seeddirs)
 
 elif what == "fuzz":
-    files = map(os.path.abspath, args)
-    f = master( cmd, files, workdir, [])
-
-    with open(seed, "rb") as x:
-        l = len(x.read())
-    f.fuzz(seed, port)
+    f = master(cfg, workdir, port)
+    for seed in glob.glob("seeds/*"):
+        f.fuzz(seed)
 
 elif what == "work":
     #set up workers
