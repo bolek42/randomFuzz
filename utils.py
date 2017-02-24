@@ -41,8 +41,9 @@ class watchDog:
 #parses asan and bitset files
 
 def save_json(fname, data):
+    j = json.dumps(data)
     with open(fname, "w") as f:
-        f.write(json.dumps(data))
+        f.write(j)
 
 def save_data(fname, data):
     with open(fname, "w") as f:

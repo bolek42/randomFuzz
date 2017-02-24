@@ -83,16 +83,16 @@ class master(api):
         #load testcases
         self.testcases = []
         i = 0
-        while os.path.exists("%s/testcase-%d.json" % (seed,i)):
-            t = load_json("%s/testcase-%d.json" % (seed, i))
+        while os.path.exists("%s/testcase-%d.json" % (self.seed,i)):
+            t = load_json("%s/testcase-%d.json" % (self.seed, i))
             self.testcases.append(t)
             i += 1
-        self.log("Loaded %d testcases for %s" % (len(self.testcases), seed))
+        self.log("Loaded %d testcases for %s" % (len(self.testcases), self.seed))
 
         #load status
         if os.path.exists("%s/status.json" % self.seed):
             status = load_json("%s/status.json" % self.seed)
-            self.t0 = time.time() - cfg["execution_time"]
+            self.t0 = time.time() - status["execution_time"]
             self.coverage = status["coverage"]
             self.total_testcases = status["total_testcases"]
         else:
@@ -129,6 +129,11 @@ class master(api):
             testcase = self.report_queue.get()
             log = []
 
+            if "total_testcases" in testcase:
+                self.total_testcases = testcase["total_testcases"]
+                self.save_status()
+                continue
+
             #update coverage if not crashed
             if "coverage" in testcase:
                 coverage = testcase["coverage"]
@@ -150,13 +155,13 @@ class master(api):
                 testcase["id"] = len(self.testcases)
                 testcase["childs"] = []
                 log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
-                save_json("testcase-%d.json" % (len(self.testcases)),testcase)
+                save_json("%s/testcase-%d.json" % (self.seed, len(self.testcases)),testcase)
                 self.testcases.append(testcase)
-                self.save_status()
 
                 pid = testcase["parent_id"]
                 self.testcases[pid]["childs"] += [testcase["id"]]
                 save_json("%s/testcase-%d.json" % (self.seed, pid),self.testcases[pid])
+                self.save_status()
 
             #handle new crash
             new_crash = False
@@ -167,10 +172,6 @@ class master(api):
                     save_json("crash/crash-%d.json" % (len(self.crash)),testcase)
                     save_data("crash/crash-%d.stderr" % (len(self.crash)),testcase["stderr"])
                     new_crash = True
-
-                    #notify
-                    #cmd = "(echo \"Subject: Crash for %s @ %s!!\" ; cat crash-%d.stderr ; base64 crash-%d.bin) | msmtp  dabolek42@gmail.com" % (os.path.basename(self.seed), crash, len(self.crash),  len(self.crash))
-                    #os.system(cmd)
 
                     self.crash += [crash]
                     save_json("crash.json", self.crash)
@@ -185,6 +186,7 @@ class master(api):
         log_old = ""
         while True:
             time.sleep(1)
+            
             #determine testaces per second
             stop = time.time()
             alpha =  0.5

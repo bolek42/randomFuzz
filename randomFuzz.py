@@ -80,14 +80,15 @@ if what == "init":
     for fname in args:
         copy2(fname, "%s/files" % workdir)
 
+    home = os.environ["HOME"]
     cfg = {}
     cfg["cmd"] = cmd
     cfg["files"] = map(os.path.basename, args)
     cfg["env"] = {}
     cfg["env"]["ASAN_OPTIONS"] = "coverage=1:coverage_bitset=1:symbolize=1"
     cfg["env"]["MALLOC_CHECK_"] = "0"
-    cfg["env"]["PATH"] = "/home/hammel/asan-builds/bin/:/home/hammel/asan-builds/sbin/"
-    cfg["env"]["LD_LIBRARY_PATH"] = "/home/hammel/asan-builds/lib/"
+    cfg["env"]["PATH"] = "%s/asan-builds/bin/:%s/asan-builds/sbin/" % (home,home)
+    cfg["env"]["LD_LIBRARY_PATH"] = "%s/asan-builds/lib/" % home
 
     save_json("%s/cfg.json" % workdir, cfg)
     
@@ -101,7 +102,10 @@ elif what == "fuzz":
     cfg = load_json("%s/cfg.json" % workdir)
     f = master(cfg, workdir, port)
     for seed in glob.glob("seeds/*"):
-        f.fuzz(seed)
+        try:
+            f.fuzz(seed)
+        except KeyboardInterrupt:
+            f.stop()
 
 elif what == "work":
     #set up worker
@@ -112,7 +116,6 @@ elif what == "work":
             w.run()
         except:
             import traceback; traceback.print_exc()
-            w.stop()
             os.kill(os.getpid(), 9)
     else:
         cwd = os.getcwd()

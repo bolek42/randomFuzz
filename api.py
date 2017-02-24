@@ -56,7 +56,7 @@ class api:
         testcases = []
         last_tid = len(self.testcases)
         for i in xrange(last_tid):
-            with open("testcase-%d.json" % i, "r") as f:
+            with open("%s/testcase-%d.json" % (self.seed, i), "r") as f:
                 testcases += [b64encode(f.read())]
         provision["testcases"] = b64encode(json.dumps(testcases))
 
@@ -93,6 +93,7 @@ class api:
             report = self.recv(conn)
             self.total_testcases += report["executed_testcases"]
 
+            self.report_queue.put({"total_testcases":self.total_testcases})
             for testcase in report["testcase_report"]:
                 self.report_queue.put(testcase)
 
@@ -126,7 +127,6 @@ class api:
         s.connect((self.ip, self.port))
         self.sock = s
         provision = self.recv(s)
-        print json.dumps(provision, indent=4)
 
         #generic
         self.cmd = provision["cmd"]

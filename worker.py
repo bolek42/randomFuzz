@@ -61,7 +61,7 @@ class worker(api):
                 self.testcases += [t]
                 if t["id"] > 0:
                     self.testcases[pid]["childs"] += [t["id"]]
-            self.testcases += update["testcase_update"]
+
             self.mutator.random_merge_cache = {}
 
         for s,coverage in update["coverage_update"].iteritems():
@@ -276,36 +276,3 @@ class worker(api):
                     import traceback; traceback.print_exc()
             i += 1
 
-
-if __name__ == "__main__":
-    import time
-    if len(sys.argv) < 3:
-        print "usage: %s ip port1 port2 ..." % sys.argv[0]
-        sys.exit(1)
-
-    #set up workers
-    workdir = os.getcwd()
-    workers = []
-    for port in sys.argv[2:]:
-        os.chdir(workdir)
-        w = randomFuzzWorker(sys.argv[1],int(port), "teststuff/work/%d" % int(port))
-        w.provision()
-        workers += [w]
-
-    try:
-        while True:
-            for i in xrange(len(workers)):
-                print ">>> Working on worker %d <<<" % i
-                workers[i].run(10000)
-                workers[i].stop()
-            
-    except KeyboardInterrupt:
-        import traceback; traceback.print_exc()
-        for w in workers:
-            w.stop()
-        os.kill(os.getpid(), 9)
-    except:
-        import traceback; traceback.print_exc()
-        for w in workers:
-            w.stop()
-        os.kill(os.getpid(), 9)
