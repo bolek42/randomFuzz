@@ -48,8 +48,6 @@ class master(api):
         #start threads
         self.log("fuzzer started")
         Thread(target=self.ui).start()
-        Thread(target=self.apply_update).start()
-
 
     def fuzz(self, seed):
         self.load_seed_state(seed)
@@ -62,6 +60,7 @@ class master(api):
         try:
             self.accept(self.port)
         except socket.error:
+            import traceback; traceback.print_exc()
             pass
 
     def stop(self):
@@ -115,13 +114,15 @@ class master(api):
 
 
     def apply_update(self):
-        while True:
-            testcase, coverage, crash, log = self.update_queue.get()
+        try:
+            testcase, coverage, crash, log = self.update_queue.get(False)
             self.testcases.append(testcase)
             self.coverage = coverage
             self.crash = crash
             for l in log:
                 self.log(l)
+        except:
+            pass
 
     def process_report(self):
         print "update processor started"
@@ -228,7 +229,9 @@ class master(api):
 
             if time.time() - last_event > 300:
                 last_event = time.time()
-                self.stop()
+                #self.stop()
+
+            self.apply_update()
 
     def log(self, msg):
         t = time.time() 

@@ -221,6 +221,7 @@ class worker(api):
             mutated["parent_id"] = tid
             yield mutated
 
+    def stop():
         for p in self.process_list:
             print "killing", p.pid
             os.kill(p.pid,9)

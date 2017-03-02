@@ -106,17 +106,24 @@ elif what == "fuzz":
             f.fuzz(seed)
         except KeyboardInterrupt:
             f.stop()
+            try:
+                time.sleep(1)
+            except:
+                os.kill(os.getpid(), 9)
 
 elif what == "work":
     #set up worker
     if len(args) == 1:
-        try:
-            w = worker("%s/run/%d" % (workdir, int(port)), n_threads=threads)
-            w.connect(ip,int(port))
-            w.run()
-        except:
-            import traceback; traceback.print_exc()
-            os.kill(os.getpid(), 9)
+        while True:
+            try:
+                w = worker("%s/run/%d" % (workdir, int(port)), n_threads=threads)
+                w.connect(ip,int(port))
+                w.run()
+            except:
+                import traceback; traceback.print_exc()
+                w.stop()
+            time.sleep(1)
+
     else:
         cwd = os.getcwd()
         workers = []
