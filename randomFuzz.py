@@ -101,15 +101,16 @@ elif what == "select-testcases":
 elif what == "fuzz":
     cfg = load_json("%s/cfg.json" % workdir)
     f = master(cfg, workdir, port)
-    for seed in glob.glob("seeds/*"):
-        try:
-            f.fuzz(seed)
-        except KeyboardInterrupt:
-            f.stop()
+    while True:
+        for seed in glob.glob("seeds/*"):
             try:
-                time.sleep(1)
-            except:
-                os.kill(os.getpid(), 9)
+                f.fuzz(seed)
+            except KeyboardInterrupt:
+                f.stop()
+                try:
+                    time.sleep(1)
+                except:
+                    os.kill(os.getpid(), 9)
 
 elif what == "work":
     #set up worker

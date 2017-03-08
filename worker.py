@@ -221,7 +221,11 @@ class worker(api):
             mutated["parent_id"] = tid
             yield mutated
 
-    def stop():
+    def stop(self):
+        try:
+            self.executor.watchDog.exit()
+        except:
+            pass
         for p in self.process_list:
             print "killing", p.pid
             os.kill(p.pid,9)

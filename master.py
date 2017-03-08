@@ -66,9 +66,12 @@ class master(api):
     def stop(self):
         self.log("stop")
         self.api_stop()
-        os.kill(self.p_process_preort.pid, 9)
         self.report_queue = Queue()
         self.update_queue = Queue()
+        try:
+            os.kill(self.p_process_preort.pid, 9)
+        except:
+            pass
 
 
     def load_seed_state(self, seed):
@@ -229,7 +232,7 @@ class master(api):
 
             if time.time() - last_event > 300:
                 last_event = time.time()
-                #self.stop()
+                self.stop()
 
             self.apply_update()
 

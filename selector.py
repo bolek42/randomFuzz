@@ -53,9 +53,9 @@ class selector:
                     with open(fname, "rb") as f:
                         data = f.read()
 
+                    self.ext = fname.split(".")[-1]
                     data = self.minimize(data)
                     fname = os.path.basename(fname)
-                    self.ext = fname.split(".")[-1]
                     with open("/tmp/minimized-%s" % fname, "wb") as f:
                         f.write(data)
 
