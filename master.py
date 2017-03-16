@@ -6,6 +6,7 @@ import socket
 import json
 import glob
 from multiprocessing import Process,Queue,Value
+from base64 import b64encode, b64decode
 from threading import Thread
 from Queue import PriorityQueue
 from copy import deepcopy
@@ -66,6 +67,7 @@ class master(api):
     def stop(self):
         self.log("stop")
         self.api_stop()
+        self.report_queue.put({"exit": True})
         self.report_queue = Queue()
         self.update_queue = Queue()
         try:
@@ -86,17 +88,26 @@ class master(api):
         self.testcases = []
         i = 0
         while os.path.exists("%s/testcase-%d.json" % (self.seed,i)):
-            t = load_json("%s/testcase-%d.json" % (self.seed, i))
-            self.testcases.append(t)
-            i += 1
+            try:
+                t = load_json("%s/testcase-%d.json" % (self.seed, i))
+                self.testcases.append(t)
+                i += 1
+            except:
+                break
         self.log("Loaded %d testcases for %s" % (len(self.testcases), self.seed))
 
         #load status
         if os.path.exists("%s/status.json" % self.seed):
-            status = load_json("%s/status.json" % self.seed)
-            self.t0 = time.time() - status["execution_time"]
-            self.coverage = status["coverage"]
-            self.total_testcases = status["total_testcases"]
+            try:
+                status = load_json("%s/status.json" % self.seed)
+                self.t0 = time.time() - status["execution_time"]
+                self.coverage = status["coverage"]
+                self.total_testcases = status["total_testcases"]
+            except:
+                self.t0 = time.time()
+                self.coverage = {}
+                self.total_testcases
+                
         else:
             self.t0 = time.time()
             self.coverage = {}
@@ -138,6 +149,9 @@ class master(api):
                 self.save_status()
                 continue
 
+            if "exit" in testcase:
+                break
+
             #update coverage if not crashed
             if "coverage" in testcase:
                 coverage = testcase["coverage"]
@@ -160,6 +174,9 @@ class master(api):
                 testcase["childs"] = []
                 log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
                 save_json("%s/testcase-%d.json" % (self.seed, len(self.testcases)),testcase)
+                binary = b64decode(testcase["bin"])
+                save_data("%s/testcase-%d.%s" % (self.seed, len(self.testcases), self.ext), binary)
+                del testcase["bin"]
                 self.testcases.append(testcase)
 
                 pid = testcase["parent_id"]
@@ -226,7 +243,7 @@ class master(api):
                 last_event = time.time()
                 log_old = self._log[-1]
 
-            if time.time() - last_event > 30 and len(self.testcases) == 0:
+            if time.time() - last_event > 100 and len(self.testcases) == 0:
                 last_event = time.time()
                 self.stop()
 

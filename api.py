@@ -134,7 +134,7 @@ class api:
         self.crash = provision["crash"]
         self.ext = provision["ext"]
         self.seed = provision["seed"]
-        self.seed_data = provision["seed_data"]
+        self.seed_data = b64decode(provision["seed_data"])
         for k in provision["env"]:
             os.environ[k] = provision["env"][k]
 

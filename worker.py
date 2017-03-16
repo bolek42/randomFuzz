@@ -83,17 +83,18 @@ class worker(api):
         try:
             data = self.mutator.mutate_seed(testcase, self.seed_data)
             stderr, crash, coverage = self.executor.call_sancov(data, self.ext)
-            self.process_result(testcase, stderr, crash, coverage)
+            self.process_result(testcase, stderr, crash, coverage, data)
         except:
             import traceback; traceback.print_exc()
             pass
 
     #detect new edges/crashes and appends to report queues
-    def process_result(self, testcase, stderr, crash, coverage):
+    def process_result(self, testcase, stderr, crash, coverage, binary):
         for s in coverage:
             if s not in self.coverage: self.coverage[s] = 0
 
         testcase["coverage"] = coverage
+        testcase["bin"] = b64encode(binary)
 
         #detect new crash
         if crash and crash not in self.crash:

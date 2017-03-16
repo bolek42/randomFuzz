@@ -13,7 +13,7 @@ _doc_="""-=randomFuzz=-
 randomFuzz.py init              --dir=workdir --cmd=cmd [files]
 randomFuzz.py select-testcases  --dir=testdir seed-dir1 seed-dir2 ...
 randomFuzz.py fuzz              --dir=workdir --port=port
-randomFuzz.py show-state        --dir=workdir
+randomFuzz.py show              --dir=workdir
 randomFuzz.py work              --dir=workdir --ip=ip ports
 randomFuzz.py crash-fuzz        --dir=testdir crashes
 
@@ -154,6 +154,34 @@ elif what == "crash-fuzz":
     files = map(os.path.basename, args[1:])
     print files
     f.crash_fuzz(files)
+
+elif what == "show":
+    cfg = load_json("%s/cfg.json" % workdir)
+    print "cmd: %s" % cfg["cmd"]
+    for k in cfg["env"]:
+        print "%s=%s" % (k,cfg["env"][k])
+
+    for fname in glob.glob("%s/seeds/*" % workdir):
+        try:
+            seed = os.path.basename(fname)
+            state = load_json("%s/%s/status.json" % (workdir, seed))
+            print seed + (" " * (32-len(seed))), 
+            t = state["execution_time"]
+            print  "% 4dh:%02dm:%02ds" % (t/3600, (t/60)%60, t%60),
+            t = state["execution_time"]
+            print "% 10d" % state["total_testcases"],
+            i = 0
+            while os.path.exists("%s/%s/testcase-%d.json" % (workdir,seed,i)):
+                i+=1
+            print "% 5d" % i,
+            for s in state["coverage"]:
+                b = state["coverage"][s]
+                print "%s: % 3.2f%%   " % (s, 100.*bin(b).count("1")/len(bin(b))),
+                
+            print ""
+
+        except:
+            print "%s broken" % seed
 
 elif what != "init":
     usage()

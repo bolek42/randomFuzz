@@ -27,7 +27,7 @@ class watchDog:
 
     def watchdog(self):
         print "watchdog started"
-        timeout = 1
+        timeout = 100
         while True:
             t,pid = self.watchDogQueue.get()
             t2 = time.time()
@@ -70,7 +70,8 @@ class executor:
 
         stdout, stderr = p.communicate(input="")
         crash, bitsets = self.parse_asan(p.pid, stderr)
-        os.remove(fname)
+        if os.path.exists(fname):
+            os.remove(fname)
 
         return stderr, crash, bitsets
 
