@@ -54,10 +54,13 @@ class api:
 
         #add known testcases
         testcases = []
-        last_tid = len(self.testcases)
+        last_tid = 0
         for i in xrange(last_tid):
+            if not os.path.exists("%s/testcase-%d.json" % (self.seed, i)):
+                break
             with open("%s/testcase-%d.json" % (self.seed, i), "r") as f:
                 testcases += [b64encode(f.read())]
+                last_tid += 1
         provision["testcases"] = b64encode(json.dumps(testcases))
 
         #add files
@@ -68,7 +71,11 @@ class api:
             f.close()
 
         #provision
-        self.send(conn, provision)
+        try:
+            self.send(conn, provision)
+        except:
+            return
+        
         del provision
         print "worker provisioned"
 
@@ -90,7 +97,10 @@ class api:
                 break
 
             #process updates
-            report = self.recv(conn)
+            try:
+                report = self.recv(conn)
+            except:
+                break
             self.total_testcases += report["executed_testcases"]
 
             self.report_queue.put({"total_testcases":self.total_testcases})

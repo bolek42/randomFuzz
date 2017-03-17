@@ -157,10 +157,13 @@ elif what == "crash-fuzz":
 
 elif what == "show":
     cfg = load_json("%s/cfg.json" % workdir)
-    print "cmd: %s" % cfg["cmd"]
+    print "cmd:"
+    print "%s" % cfg["cmd"]
+    print "\nenv:"
     for k in cfg["env"]:
         print "%s=%s" % (k,cfg["env"][k])
 
+    print ""
     for fname in glob.glob("%s/seeds/*" % workdir):
         try:
             seed = os.path.basename(fname)
@@ -174,7 +177,7 @@ elif what == "show":
             while os.path.exists("%s/%s/testcase-%d.json" % (workdir,seed,i)):
                 i+=1
             print "% 5d" % i,
-            for s in state["coverage"]:
+            for s in sorted(state["coverage"].keys()):
                 b = state["coverage"][s]
                 print "%s: % 3.2f%%   " % (s, 100.*bin(b).count("1")/len(bin(b))),
                 
