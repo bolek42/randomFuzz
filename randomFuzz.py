@@ -85,10 +85,10 @@ if what == "init":
     cfg["cmd"] = cmd
     cfg["files"] = map(os.path.basename, args)
     cfg["env"] = {}
-    cfg["env"]["ASAN_OPTIONS"] = "coverage=1:coverage_bitset=1:symbolize=1"
-    cfg["env"]["MALLOC_CHECK_"] = "0"
-    cfg["env"]["PATH"] = "%s/asan-builds/bin/:%s/asan-builds/sbin/" % (home,home)
-    cfg["env"]["LD_LIBRARY_PATH"] = "%s/asan-builds/lib/" % home
+    #cfg["env"]["ASAN_OPTIONS"] = "coverage=1:coverage_bitset=1:symbolize=1"
+    #cfg["env"]["MALLOC_CHECK_"] = "0"
+    #cfg["env"]["PATH"] = "%s/asan-builds/bin/:%s/asan-builds/sbin/" % (home,home)
+    #cfg["env"]["LD_LIBRARY_PATH"] = "%s/asan-builds/lib/" % home
 
     save_json("%s/cfg.json" % workdir, cfg)
     

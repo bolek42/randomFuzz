@@ -16,7 +16,7 @@ class selector:
         self.executor = executor(self.cmd, self.workdir+"/run")
 
     def minimize(self, data):
-        _,_,bitsets = self.executor.call_sancov(data, self.ext)
+        _,_,bitsets = self.executor.call(data, self.ext)
 
         l = len(data)
         blocksize = 2**(len(data)-1).bit_length()
@@ -25,7 +25,7 @@ class selector:
             while j < len(data):
                 sys.stderr.write("\rblocksize: %d len: %d/%d    " % (blocksize, len(data), l))
                 min_data = data[:j] + data[j+blocksize:]
-                _,_,b = self.executor.call_sancov(min_data, self.ext)
+                _,_,b = self.executor.call(min_data, self.ext)
                 equal = True
                 try:
                     for s in bitsets:
@@ -54,7 +54,7 @@ class selector:
                         data = f.read()
 
                     self.ext = fname.split(".")[-1]
-                    data = self.minimize(data)
+                    #data = self.minimize(data)
                     fname = os.path.basename(fname)
                     with open("/tmp/minimized-%s" % fname, "wb") as f:
                         f.write(data)
@@ -62,7 +62,7 @@ class selector:
                     start = time.time()
                     try:
                         for i in xrange(1):
-                            _,_,b = self.executor.call_sancov(data, self.ext)
+                            _,_,b = self.executor.call(data, self.ext)
                     except:
                         continue
 

@@ -82,7 +82,7 @@ class worker(api):
         self.executed_testcases.value += 1
         try:
             data = self.mutator.mutate_seed(testcase, self.seed_data)
-            stderr, crash, coverage = self.executor.call_sancov(data, self.ext)
+            stderr, crash, coverage = self.executor.call(data, self.ext)
             self.process_result(testcase, stderr, crash, coverage, data)
         except:
             import traceback; traceback.print_exc()
@@ -112,6 +112,7 @@ class worker(api):
                 c = int(coverage[s])
                 new_blocks += (~self.coverage[s]) & c
 
+            print bin(new_blocks).count("1")
             if new_blocks > 0:
                 #remove unused mutations
                 testcase["new_blocks"] = bin(new_blocks).count("1")
