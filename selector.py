@@ -44,7 +44,7 @@ class selector:
 
         return data
 
-    def select_testcases(self, seeddirs, count=10):
+    def select_testcases(self, seeddirs, count=30):
         #determine execution time for each file
         results = []
         try:

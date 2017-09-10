@@ -3,6 +3,7 @@ import os
 import getopt
 import json
 from shutil import copy2
+from random import shuffle
 
 from utils import *
 from selector import selector
@@ -102,7 +103,9 @@ elif what == "fuzz":
     cfg = load_json("%s/cfg.json" % workdir)
     f = master(cfg, workdir, port)
     while True:
-        for seed in glob.glob("seeds/*"):
+	seeds = glob.glob("seeds/*")
+	shuffle(seeds)
+        for seed in seeds:
             try:
                 f.fuzz(seed)
             except KeyboardInterrupt:
@@ -124,6 +127,7 @@ elif what == "work":
                 import traceback; traceback.print_exc()
                 w.stop()
             time.sleep(1)
+            os.kill(os.getpid(), 9)
 
     else:
         cwd = os.getcwd()

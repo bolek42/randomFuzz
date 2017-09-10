@@ -71,6 +71,7 @@ class master(api):
         self.report_queue = Queue()
         self.update_queue = Queue()
         try:
+            time.sleep(3)
             os.kill(self.p_process_preort.pid, 9)
         except:
             pass
@@ -247,7 +248,7 @@ class master(api):
                 last_event = time.time()
                 self.stop()
 
-            if time.time() - last_event > 300:
+            if time.time() - last_event > 1800:
                 last_event = time.time()
                 self.stop()
 
