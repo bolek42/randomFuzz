@@ -27,7 +27,7 @@ class watchDog:
 
     def watchdog(self):
         print "watchdog started"
-        timeout = 100
+        timeout = 0.5
         while True:
             t,pid = self.watchDogQueue.get()
             t2 = time.time()
@@ -98,9 +98,9 @@ class executor:
 
             cause = "OTHER"
             if "READ" in stderr:
-                cause = re.findall("READ of size [0-9]*", stderr)[0]
+                cause = "READ"#re.findall("READ of size [0-9]*", stderr)[0]
             elif "WRITE" in stderr:
-                cause = re.findall("WRITE of size [0-9]*", stderr)[0]
+                cause = "WRITE"#re.findall("WRITE of size [0-9]*", stderr)[0]
 
             crash = "%s-%s" % (crash, cause)
 

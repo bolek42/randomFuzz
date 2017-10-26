@@ -117,39 +117,17 @@ elif what == "fuzz":
 
 elif what == "work":
     #set up worker
-    if len(args) == 1:
-        while True:
-            try:
-                w = worker("%s/run/%d" % (workdir, int(port)), n_threads=threads)
-                w.connect(ip,int(port))
-                w.run()
-            except:
-                import traceback; traceback.print_exc()
-                w.stop()
-            time.sleep(1)
-            os.kill(os.getpid(), 9)
-
-    else:
-        cwd = os.getcwd()
-        workers = []
-        for port in args:
-            os.chdir(cwd)
-            w = worker(ip,int(port), "%s/run/%d" % (workdir, int(port)), n_threads=threads, mutations=mutations)
-            w.provision()
-            workers += [w]
-
+    workdir = os.path.abspath(workdir)
+    while True:
         try:
-            while True:
-                for i in xrange(len(workers)):
-                    print ">>> Working on worker %d <<<" % i
-                    workers[i].run(10000)
-                    workers[i].stop()
-            
+            w = worker("%s/run/%d" % (workdir, int(port)), n_threads=threads)
+            w.connect(ip,int(port))
+            w.run()
         except:
             import traceback; traceback.print_exc()
-            for w in workers:
-                w.stop()
-            os.kill(os.getpid(), 9)
+            w.stop()
+        time.sleep(1)
+        os.kill(os.getpid(), 9)
 
 elif what == "crash-fuzz":
     print cmd

@@ -99,6 +99,7 @@ class worker(api):
         #detect new crash
         if crash and crash not in self.crash:
             print "New crash %s" % crash
+            print testcase["bin"]
             testcase["crash"] = crash
             testcase["stderr"] = stderr
             self.testcase_report.put(testcase)

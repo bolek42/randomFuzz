@@ -193,6 +193,7 @@ class master(api):
                     log.append("New Crash @ %s !!" % (crash))
                     save_json("crash/crash-%d.json" % (len(self.crash)),testcase)
                     save_data("crash/crash-%d.stderr" % (len(self.crash)),testcase["stderr"])
+                    save_data("crash/crash-%d.%s" % (len(self.crash), self.ext), b64decode(testcase["bin"]))
                     new_crash = True
 
                     self.crash += [crash]

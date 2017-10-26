@@ -4,6 +4,8 @@ Test programs must be compiled with the following command and accept a binary fi
 ```shell
 clang -fsanitize=address -fsanitize-coverage=bb
 ```
+The fuzzer will use the prefix '~/asan-builds/' where you can install your asan compiled builds (libs+binaries).
+Further documentation will be published [here](https://bolek42.github.io/sec/fuzz.html)
 
 ## 1. Init
 ```shell
@@ -30,7 +32,7 @@ It will pass all necessary information to the worker, that will execute the test
 
 ## 4. Start Worker
 ```shell
-randomFuzz.py work --dir=workdir --ip=ip ports
+while [ 1 -eq 1 ]; do randomFuzz.py work --dir=workdir --ip=ip --port=ports; done
 ```
 The worker will fetch all needed files from the master and starts mutating them in a randomly and update the master.
 All ports provided to the worker will be served in a round robin schedule.
