@@ -153,6 +153,8 @@ class master(api):
             if "exit" in testcase:
                 break
 
+            binary = b64decode(testcase["bin"])
+
             #update coverage if not crashed
             if "coverage" in testcase:
                 coverage = testcase["coverage"]
@@ -175,7 +177,6 @@ class master(api):
                 testcase["childs"] = []
                 log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
                 save_json("%s/testcase-%d.json" % (self.seed, len(self.testcases)),testcase)
-                binary = b64decode(testcase["bin"])
                 save_data("%s/testcase-%d.%s" % (self.seed, len(self.testcases), self.ext), binary)
                 del testcase["bin"]
                 self.testcases.append(testcase)
@@ -193,7 +194,7 @@ class master(api):
                     log.append("New Crash @ %s !!" % (crash))
                     save_json("crash/crash-%d.json" % (len(self.crash)),testcase)
                     save_data("crash/crash-%d.stderr" % (len(self.crash)),testcase["stderr"])
-                    save_data("crash/crash-%d.%s" % (len(self.crash), self.ext), b64decode(testcase["bin"]))
+                    save_data("crash/crash-%d.%s" % (len(self.crash), self.ext), binary)
                     new_crash = True
 
                     self.crash += [crash]

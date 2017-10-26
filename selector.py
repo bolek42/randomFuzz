@@ -30,6 +30,7 @@ class selector:
                 try:
                     for s in bitsets:
                         if bin(bitsets[s]).count("1") > bin(b[s]).count("1"):
+                        #if (bitsets[s] ^ b[s]) & bitsets[s] == 0:
                             equal = False
                 except:
                     equal = False
@@ -54,7 +55,7 @@ class selector:
                         data = f.read()
 
                     self.ext = fname.split(".")[-1]
-                    data = self.minimize(data)
+                    #data = self.minimize(data)
                     fname = os.path.basename(fname)
                     with open("/tmp/minimized-%s" % fname, "wb") as f:
                         f.write(data)
