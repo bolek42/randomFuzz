@@ -69,7 +69,6 @@ class executor:
 
         cmd = (self.cmd % fname).split(" ")
         cmd = ["qemu-x86_64", "-trace", "translate_block,file=%s" % prefix] + cmd
-        print " ".join(cmd)
         p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
         self.watchDog.start(p.pid)
 
@@ -87,8 +86,12 @@ class executor:
         f = open(fname, "r")
         cov = []
         for line in f:
-            pc = re.findall("pc:0x[0-9a-f]*",line)[0][3:]
-            cov += [int(pc,16)]
+            try:
+                pc = re.findall("pc:0x[0-9a-f]*",line)[0][3:]
+                cov += [int(pc,16)]
+            except:
+                print line
+                import traceback; traceback.print_exc()
 
         f.close()
         return set(cov)
