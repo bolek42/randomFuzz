@@ -71,6 +71,7 @@ class master(api):
         self.report_queue = Queue()
         self.update_queue = Queue()
         try:
+            time.sleep(3)
             os.kill(self.p_process_preort.pid, 9)
         except:
             pass
@@ -150,6 +151,8 @@ class master(api):
             if "exit" in testcase:
                 break
 
+            binary = b64decode(testcase["bin"])
+
             #update coverage if not crashed
             if "coverage" in testcase:
                 coverage = set(testcase["coverage"])
@@ -164,7 +167,6 @@ class master(api):
                 testcase["childs"] = []
                 log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
                 save_json("%s/testcase-%d.json" % (self.seed, len(self.testcases)),testcase)
-                binary = b64decode(testcase["bin"])
                 save_data("%s/testcase-%d.%s" % (self.seed, len(self.testcases), self.ext), binary)
                 del testcase["bin"]
                 self.testcases.append(testcase)
@@ -182,6 +184,7 @@ class master(api):
                     log.append("New Crash @ %s !!" % (crash))
                     save_json("crash/crash-%d.json" % (len(self.crash)),testcase)
                     save_data("crash/crash-%d.stderr" % (len(self.crash)),testcase["stderr"])
+                    save_data("crash/crash-%d.%s" % (len(self.crash), self.ext), binary)
                     new_crash = True
 
                     self.crash += [crash]
@@ -235,7 +238,7 @@ class master(api):
                 last_event = time.time()
                 self.stop()
 
-            if time.time() - last_event > 300:
+            if time.time() - last_event > 1800:
                 last_event = time.time()
                 self.stop()
 

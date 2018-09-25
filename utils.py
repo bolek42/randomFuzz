@@ -28,7 +28,7 @@ class watchDog:
 
     def watchdog(self):
         print "watchdog started"
-        timeout = 100
+        timeout = 1
         while True:
             t,pid = self.watchDogQueue.get()
             t2 = time.time()

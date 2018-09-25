@@ -38,7 +38,7 @@ class selector:
 
         return data
 
-    def select_testcases(self, seeddirs, count=10):
+    def select_testcases(self, seeddirs, count=30):
         #determine execution time for each file
         results = []
         try:
@@ -48,7 +48,7 @@ class selector:
                         data = f.read()
 
                     self.ext = fname.split(".")[-1]
-                    data = self.minimize(data)
+                    #data = self.minimize(data)
                     fname = os.path.basename(fname)
                     with open("/tmp/minimized-%s" % fname, "wb") as f:
                         f.write(data)

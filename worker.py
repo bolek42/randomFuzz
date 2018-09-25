@@ -96,6 +96,7 @@ class worker(api):
         #detect new crash
         if crash and crash not in self.crash:
             print "New crash %s" % crash
+            print testcase["bin"]
             testcase["crash"] = crash
             testcase["stderr"] = stderr
             self.testcase_report.put(testcase)
@@ -194,7 +195,6 @@ class worker(api):
                     break
             tid = self.testcases.index(t)
 
-
             merged = self.mutator.random_merge(self.testcases, tid)
             if merged: yield merged
 
@@ -202,7 +202,10 @@ class worker(api):
             testcase = self.testcases[tid]
 
             #mutate
-            mutated = self.mutator.random_mutation(testcase ,maximum=8)
+            if tid == 0:
+                mutated = self.mutator.random_mutation(testcase ,maximum=8, mutations=[0,1,2])
+            else:
+                mutated = self.mutator.random_mutation(testcase ,maximum=8)
             mutated["parent_id"] = tid
             yield mutated
 
