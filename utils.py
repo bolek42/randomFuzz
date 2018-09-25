@@ -7,6 +7,7 @@ import json
 from random import getrandbits
 import re
 import sys
+import r2pipe
 
 #watchdog terminates processes after timeout
 #and delete left files
@@ -53,56 +54,58 @@ def load_json(fname):
     with open(fname, "r") as f:
         return json.loads(f.read())
 
+
 class executor:
     def __init__(self, cmd, workdir):
         os.chdir(workdir)
         self.watchDog = watchDog()
         self.cmd = cmd
 
-    def call_sancov(self, data, ext):
-        fname = "t-%016x.%s" % (getrandbits(64), ext)
+    def call(self, data, ext):
+        prefix = "t-%016x" % getrandbits(64)
+        fname = "%s.%s" % (prefix, ext)
         with open( fname, "w") as f:
             f.write(data)
 
         cmd = (self.cmd % fname).split(" ")
+        cmd = ["qemu-x86_64", "-trace", "translate_block,file=%s" % prefix] + cmd
+        print " ".join(cmd)
         p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
         self.watchDog.start(p.pid)
 
         stdout, stderr = p.communicate(input="")
-        crash, bitsets = self.parse_asan(p.pid, stderr)
-        if os.path.exists(fname):
+
+        cov = self.coverage(prefix)
+        crash = self.coredump(p.pid)
+
+        for fname in glob.glob(prefix+"*"):
             os.remove(fname)
 
-        return stderr, crash, bitsets
+        return stdout+stderr, crash, cov
 
-    def parse_asan(self, pid, stderr):
-        bitsets = {}
-        for sname in glob.glob("*.%d.bitset-sancov" % (pid)):
-            f = open(sname)
-            bitsets[".".join(sname.split(".")[:-2])] = int("1"+f.read(),2)
-            f.close()
-            os.remove(sname)
+    def coverage(self, fname):
+        f = open(fname, "r")
+        cov = []
+        for line in f:
+            pc = re.findall("pc:0x[0-9a-f]*",line)[0][3:]
+            cov += [int(pc,16)]
 
-        for sname in glob.glob("*.%d.sancov" % (pid)):
-            os.remove(sname)
+        f.close()
+        return set(cov)
 
-        # log crash
-        crash = False
-        cause = ""
-        if "ERROR: AddressSanitizer:" in stderr:
-            try:
-                errorline = re.findall( "[ ]*#0 0x[0-9a-f]*[ ]*(.*\+0x[0-9a-f]*)", stderr)[0]
-                crash = re.findall("0x[0-9a-f]*", errorline)[0]
-            except:
-                crash = "0x42424242"
+    def coredump(self, pid):
+        coredump = glob.glob("qemu_*_%d.core" % pid)
+        if len(coredump) != 0:
+            r = r2pipe.open(coredump[0])
+            os.unlink(coredump[0])
+            return r.cmd("dr")
 
-            cause = "OTHER"
-            if "READ" in stderr:
-                cause = re.findall("READ of size [0-9]*", stderr)[0]
-            elif "WRITE" in stderr:
-                cause = re.findall("WRITE of size [0-9]*", stderr)[0]
+        return False
 
-            crash = "%s-%s" % (crash, cause)
 
-        return crash, bitsets
+if __name__ == "__main__":
+    with open("teststuff/pdfs/RES_V76K9ZF_AKUN9CL44276_0.pdf", "r") as f:
+        data = f.read()
 
+    q = executor("/usr/bin/evince-thumbnailer %s test", "/tmp")
+    print q.call(data, "pdf")

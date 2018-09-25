@@ -41,7 +41,7 @@ class master(api):
 
         #fuzzing state
         self.testcases = []
-        self.coverage = {}
+        self.coverage = set()
         self.t0 = time.time()
         self.total_testcases = 0
         self.seed = ""
@@ -101,27 +101,25 @@ class master(api):
             try:
                 status = load_json("%s/status.json" % self.seed)
                 self.t0 = time.time() - status["execution_time"]
-                self.coverage = status["coverage"]
+                self.coverage = set(status["coverage"])
                 self.total_testcases = status["total_testcases"]
             except:
                 self.t0 = time.time()
-                self.coverage = {}
+                self.coverage = set()
                 self.total_testcases
                 
         else:
             self.t0 = time.time()
-            self.coverage = {}
+            self.coverage = set()
             self.total_testcases
 
         if len(self.testcases) > 0:
-            for s in self.coverage:
-                covered = bin(self.coverage[s]).count("1")
-                missing = bin(~self.coverage[s]).count("0")
-                self.log("%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing)))
+            covered = len(self.coverage)
+            self.log("%d covered" % (covered))
 
     def save_status(self):
         status = {}
-        status["coverage"] = self.coverage
+        status["coverage"] = list(self.coverage)
         status["execution_time"] = time.time() - self.t0
         status["total_testcases"] = self.total_testcases
         save_json("%s/status.json" % self.seed, status)
@@ -154,22 +152,14 @@ class master(api):
 
             #update coverage if not crashed
             if "coverage" in testcase:
-                coverage = testcase["coverage"]
-
-                for s in coverage:
-                    if s not in self.coverage: self.coverage[s] = 0
-                new_blocks = 0
-                blocks = 0
-                for s in coverage:
-                    bitset = int(coverage[s])
-                    blocks += bin(bitset).count("1")
-                    new_blocks += bin((~self.coverage[s]) & bitset).count("1")
-                    self.coverage[s] |= bitset
+                coverage = set(testcase["coverage"])
+                new_blocks = len(coverage - self.coverage)
+                self.coverage.update(coverage)
+                del testcase["coverage"]
 
             #append new testcase
             if new_blocks > 0:
                 testcase["new_blocks"] = new_blocks
-                testcase["blocks"] = blocks
                 testcase["id"] = len(self.testcases)
                 testcase["childs"] = []
                 log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
@@ -228,10 +218,8 @@ class master(api):
             t = time.time() - self.t0
             print "Time: %dd:%dh:%dm:%ds" %((t/3600/24), (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"
-            for s in self.coverage:
-                covered = bin(self.coverage[s]).count("1")
-                missing = bin(~self.coverage[s]).count("0")
-                print "%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing))
+            covered = len(self.coverage)
+            print "%d covered" % (covered)
 
             print "\nLog:"
             for message in self._log[-16:]:

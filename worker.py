@@ -25,7 +25,7 @@ class worker(api):
         self.update_queues = []
         self.testcase_report = Queue()
 
-        self.coverage = {}
+        self.coverage = set()
         self.testcases = []
         self.executed_testcases = Value('i', 0)
 
@@ -64,8 +64,8 @@ class worker(api):
 
             self.mutator.random_merge_cache = {}
 
-        for s,coverage in update["coverage_update"].iteritems():
-            self.coverage[s] = coverage
+        if "coverage_update" in update:
+            self.coverage.update(set(update["coverage_update"]))
 
         self.crash = update["crash"]
 
@@ -82,7 +82,7 @@ class worker(api):
         self.executed_testcases.value += 1
         try:
             data = self.mutator.mutate_seed(testcase, self.seed_data)
-            stderr, crash, coverage = self.executor.call_sancov(data, self.ext)
+            stderr, crash, coverage = self.executor.call(data, self.ext)
             self.process_result(testcase, stderr, crash, coverage, data)
         except:
             import traceback; traceback.print_exc()
@@ -90,10 +90,7 @@ class worker(api):
 
     #detect new edges/crashes and appends to report queues
     def process_result(self, testcase, stderr, crash, coverage, binary):
-        for s in coverage:
-            if s not in self.coverage: self.coverage[s] = 0
-
-        testcase["coverage"] = coverage
+        testcase["coverage"] = list(coverage)
         testcase["bin"] = b64encode(binary)
 
         #detect new crash
@@ -107,14 +104,11 @@ class worker(api):
 
         #found new blocks, requeue to remove unused mutations
         if "minimize" not in testcase:
-            new_blocks = 0
-            for s in coverage:
-                c = int(coverage[s])
-                new_blocks += (~self.coverage[s]) & c
+            new_blocks = len(coverage - self.coverage)
 
             if new_blocks > 0:
                 #remove unused mutations
-                testcase["new_blocks"] = bin(new_blocks).count("1")
+                testcase["new_blocks"] = new_blocks
                 minimize = {}
                 minimize["i"] = 0
                 minimize["reference"] = deepcopy(testcase)
@@ -129,19 +123,12 @@ class worker(api):
             #test if testcase covered equal or more blocks
             ge = False
             if not crash: 
-                new_blocks = 0
-                for s in testcase["coverage"]:
-                    c = int(coverage[s])
-                    new_blocks += bin((~self.coverage[s]) & c).count("1")
+                new_blocks = len(coverage - self.coverage)
 
                 testcase["new_blocks"] = new_blocks
                 if new_blocks >= reference["new_blocks"]:
                     ge = True
 
-            nb2 = 0
-            for s in reference["coverage"]:
-                coverage = int(reference["coverage"][s])
-                nb2 += bin((~self.coverage[s]) & coverage).count("1")
             #done
             if i >= len(testcase["mutations"]) - 1:
                 if not ge:
@@ -156,10 +143,7 @@ class worker(api):
                 print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
                 print "Mutations: %d" % len(testcase["mutations"]), 
                 print "Report Queue: %d" % self.testcase_report.qsize()
-                new_blocks = 0
-                for s in testcase["coverage"]:
-                    coverage = int(testcase["coverage"][s])
-                    new_blocks += bin((~self.coverage[s]) & coverage).count("1")
+                new_blocks = len(coverage - self.coverage)
                 self.testcase_report.put(testcase)
                 return
 

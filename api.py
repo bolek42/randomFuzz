@@ -46,7 +46,7 @@ class api:
         provision["env"] = self.env
         provision["seed"] = os.path.basename(self.seed)
         provision["ext"] = self.ext
-        provision["coverage"] = self.coverage
+        provision["coverage"] = list(self.coverage)
         provision["crash"] = self.crash
 
         with open("seeds/" + self.seed, "r") as f:
@@ -86,9 +86,8 @@ class api:
             update["testcase_update"] = self.testcases[last_tid:]
             last_tid += len(update["testcase_update"])
 
-            update["coverage_update"] = {}
             if len(update["testcase_update"]) > 0:
-                update["coverage_update"] = self.coverage
+                update["coverage_update"] = list(self.coverage)
 
             update["crash"] = self.crash
             try:
@@ -140,13 +139,13 @@ class api:
 
         #generic
         self.cmd = provision["cmd"]
-        self.coverage = provision["coverage"]
+        self.coverage = set(provision["coverage"])
         self.crash = provision["crash"]
         self.ext = provision["ext"]
         self.seed = provision["seed"]
         self.seed_data = b64decode(provision["seed_data"])
-        for k in provision["env"]:
-            os.environ[k] = provision["env"][k]
+        #for k in provision["env"]:
+        #    os.environ[k] = provision["env"][k]
 
         #load testcases
         for t in json.loads(b64decode(provision["testcases"])):
@@ -182,12 +181,7 @@ class api:
                 queue.put(update)
 
             if len(update["testcase_update"]) > 0:
-                print "Got %d new Testcases %d Total; Coverage:" % (len(update["testcase_update"]), len(self.testcases)),
-                for s in self.coverage:
-                    covered = bin(self.coverage[s]).count("1")
-                    missing = bin(~self.coverage[s]).count("0")
-                    print "%s: %d" % (s,covered),
-                print "\n",
+                print "Got %d new Testcases %d Total; Coverage: %d" % (len(update["testcase_update"]), len(self.testcases), len(self.coverage))
 
             #report
             report = {}

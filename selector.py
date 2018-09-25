@@ -9,14 +9,15 @@ from utils import *
 class selector:
     def __init__(self, cfg, workdir):
         self.cmd = cfg["cmd"]
-        for k in cfg["env"]:
-            os.environ[k] = cfg["env"][k]
+        #for k in cfg["env"]:
+        #    os.environ[k] = cfg["env"][k]
 
         self.workdir = os.path.abspath(workdir)
         self.executor = executor(self.cmd, self.workdir+"/run")
 
     def minimize(self, data):
-        _,_,bitsets = self.executor.call_sancov(data, self.ext)
+        return data #XXX
+        _,_,coverage = self.executor.call(data, self.ext)
 
         l = len(data)
         blocksize = 2**(len(data)-1).bit_length()
@@ -25,16 +26,9 @@ class selector:
             while j < len(data):
                 sys.stderr.write("\rblocksize: %d len: %d/%d    " % (blocksize, len(data), l))
                 min_data = data[:j] + data[j+blocksize:]
-                _,_,b = self.executor.call_sancov(min_data, self.ext)
-                equal = True
-                try:
-                    for s in bitsets:
-                        if bin(bitsets[s]).count("1") > bin(b[s]).count("1"):
-                            equal = False
-                except:
-                    equal = False
+                _,_,c = self.executor.call(min_data, self.ext)
 
-                if equal:
+                if c == coverage:
                     data = min_data
                 else:
                     j += blocksize
@@ -62,57 +56,44 @@ class selector:
                     start = time.time()
                     try:
                         for i in xrange(1):
-                            _,_,b = self.executor.call_sancov(data, self.ext)
+                            _,_,c = self.executor.call(data, self.ext)
                     except:
                         continue
 
-                    hit, missed = 0, 1
-                    for s in b:
-                        hit += bin(b[s]).count("1")
-                        missed += bin(b[s]).count("0")
+                    hit = len(c)
                     
                     t = time.time() - start
-                    print "%fs for %s (%d hit %.2f%%)" % (t, fname, hit, (hit*100.)/(hit+missed))
-                    results += [(fname, b, t, len(data), 0)]
+                    print "%fs for %s (%d hit)" % (t, fname, hit)
+                    results += [(fname, c, t, len(data), 0)]
         except KeyboardInterrupt:
             pass
 
         #sort by size
-        bitsets = {}
+        coverage = set()
         tmp = []
-        for fname,b,t,l,_ in sorted(results, key=lambda x: x[3]):
-            new_blocks = 0
-            for s in b:
-                if s not in bitsets:
-                    bitsets[s] = 0
-
-                new_blocks += bin((~bitsets[s]) & b[s]).count("1")
-                bitsets[s] |= b[s]
+        for fname,c,t,l,_ in sorted(results, key=lambda x: x[3]):
+            new_blocks = len(c - coverage)
+            coverage.update(c)
 
             if new_blocks > 10:
-                tmp += [[fname, b, t, l, new_blocks]]
+                tmp += [[fname, c, t, l, new_blocks]]
 
         while len(results) > count + 10:
             #sort results by new blocks
             results = []
-            bitsets = {}
-            for fname, b, t, l, new_blocks in sorted(tmp, key=lambda x: x[4], reverse=True)[:-1]:
-                new_blocks = 0
-                for s in b:
-                    if s not in bitsets:
-                        bitsets[s] = 0
-
-                    new_blocks += bin((~bitsets[s]) & b[s]).count("1")
-                    bitsets[s] |= b[s]
+            coverage = set()
+            for fname, c, t, l, new_blocks in sorted(tmp, key=lambda x: x[4], reverse=True)[:-1]:
+                new_blocks = len(c - coverage)
+                coverage.update(c)
 
                 if new_blocks > 10:
-                    results += [[fname, b, t, l, new_blocks]]
+                    results += [[fname, c, t, l, new_blocks]]
                 #print "New blocks %d, time: %.4fs, file: %s" % (new_blocks, t, fname)
 
             tmp = results
 
         i = 0
-        for fname, b, t, l, new_blocks in sorted(results, key=lambda x: x[4], reverse=True)[:count]:
+        for fname, c, t, l, new_blocks in sorted(results, key=lambda x: x[4], reverse=True)[:count]:
             print "New blocks %d, time: %.4fs, len: %d: file: %s" % (new_blocks, t, l, fname)
             for f in glob.glob("%s/seeds/seed-min-%d.*" %  (self.workdir,i)):
                 os.remove(f)
