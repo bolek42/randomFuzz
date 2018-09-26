@@ -101,7 +101,10 @@ class executor:
         if len(coredump) != 0:
             r = r2pipe.open(coredump[0])
             os.unlink(coredump[0])
-            return r.cmd("dr")
+            ret = r.cmd("dr")
+            print ret
+            pc = re.findall("rip.*=.*0x[0-9a-f]*",ret)[0]
+            return re.findall("0x[0-9a-f]*",pc)[0]
 
         return False
 
@@ -110,5 +113,6 @@ if __name__ == "__main__":
     with open("teststuff/pdfs/RES_V76K9ZF_AKUN9CL44276_0.pdf", "r") as f:
         data = f.read()
 
-    q = executor("/usr/bin/evince-thumbnailer %s test", "/tmp")
-    print q.call(data, "pdf")
+    #q = executor("/usr/bin/evince-thumbnailer %s test", "/tmp")
+    q = executor("/home/hammel/hck/randomFuzz/qemutest/segv %s test", "/tmp")
+    print q.call(data, "pdf")[1]
