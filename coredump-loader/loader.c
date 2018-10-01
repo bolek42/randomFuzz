@@ -13,12 +13,17 @@
 #include <elf.h> //Elf64_Nhdr
 #include <signal.h> //sigcontext
 #include <sys/auxv.h> //auxv_t
+#include <ucontext.h> //get_context()
+
+#include <asm/prctl.h>
+#include <sys/prctl.h>
 
 #include "sys/ucontext.h"
 
 #define round8(x) (((x)%8 == 0) ? (x) : (x)+8-(x)%8)
 
-void sigret(void *arg) { asm("mov %rdi, %rsp; mov $0xf, %rax; syscall");}
+void sigret(void *arg) { asm("push %rdi"); arch_prctl(ARCH_SET_FS, 0x4aa880); asm("pop %rdi; mov %fs:0x30,%rdx; mov %rdi, %rsp; mov $0xf, %rax; syscall");}
+//void sigret(void *arg) { asm("push %rdi"); arch_prctl(ARCH_SET_FS, 0x7ffff7f6c500); asm("pop %rdi; mov %fs:0x30,%rdx; mov %rdi, %rsp; mov $0xf, %rax; syscall");}
 
 void hexdump(char *buf, int size) {int i; for(i=0; i<size; i++) printf("%02x ", buf[i]&0xff); printf("\n");}
 
@@ -29,7 +34,7 @@ void *mmap_handler(void *addr, size_t len, int prot, int flags, int fildes, off_
 
     for (i = 0; i < n_maps; i++) {
         if (maps[i] == addr) {
-            printf("%p already mapped, using mprotect\n", addr);
+            printf("\t%p already mapped, using mprotect\n", addr);
             mprotect(addr, len, prot);
             return addr;
         }
@@ -60,7 +65,7 @@ void map_core_phdr(void *elf_file) {
         Elf64_Phdr *phdr = elf_file + elf_hdr->e_phoff;
     #endif
     
-    printf("Mapping program headers\n");
+    printf("Loading core program headers\n");
     //parsing programheader
     for (i=0; i < elf_hdr->e_phnum ; i++) {
         //loading memory sections
@@ -82,6 +87,21 @@ void map_core_phdr(void *elf_file) {
             mprotect((void *)phdr[i].p_vaddr, phdr[i].p_memsz, prot);
         }
     }
+}
+
+void *translate_ptr(void *elf_file, void *ptr) {
+    int i;
+    #ifdef __x86_64__
+        Elf64_Ehdr *elf_hdr = elf_file;
+        Elf64_Phdr *phdr = elf_file + elf_hdr->e_phoff;
+    #endif
+    
+    for (i=0; i < elf_hdr->e_phnum ; i++)
+        if (phdr[i].p_type == PT_LOAD) 
+            if ((size_t)ptr >= phdr[i].p_vaddr && (size_t)ptr < phdr[i].p_vaddr + phdr[i].p_filesz)
+                return elf_file + phdr[i].p_offset + (size_t)ptr - phdr[i].p_vaddr;
+
+    return NULL;
 }
 
 void map_phdr(void *elf_file, void *offset) {
@@ -272,11 +292,11 @@ void load_mapped_files(void *core_file) {
         char *fname = (char *)&maps_start[2 + n_files*3];
         void *start = maps_start[i*3 + 2];
         void *stop = maps_start[i*3 + 3];
-        void *offset = maps_start[i*3 + 4];
+        size_t offset = (size_t)maps_start[i*3 + 4];
         printf("\tMapping %p %p %p %s\n", start, stop, offset, fname);
 
         int map_fd = open(fname, O_RDONLY, 0);
-        mmap_handler(start, stop-start, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE, map_fd, 0);
+        mmap_handler(start, stop-start, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE, map_fd, offset);
         close(map_fd);
 
         fname += strlen(fname) + 1;
@@ -434,7 +454,7 @@ void *load_file(char *fname, int *size){
 
     *size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    printf("Loading %s (%d bytes)\n", fname, *size);
+    //printf("Loading %s (%d bytes)\n", fname, *size);
     buf = malloc(*size);
     read(fd, buf,  *size);
     close(fd);
@@ -442,54 +462,119 @@ void *load_file(char *fname, int *size){
     return buf;
 }
 
+extern void __init_tls(size_t *aux);
 void load_elf(char *fname, void *offset) {
     printf("Loading %s at offset %p\n", fname, offset);
-    int fd = open(fname, O_RDONLY, 0);
-    mmap_handler(offset, getpagesize(), PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
     int elf_size;
     void *elf_file = load_file(fname, &elf_size);
-    map_phdr(elf_file, NULL);// + 0x1000);
 
+    int i;
+    #ifdef __x86_64__
+        Elf64_Ehdr *elf_hdr = elf_file;
+        Elf64_Phdr *phdr = elf_file + elf_hdr->e_phoff;
+    #endif
+    
+    print_auvx(elf_file);
+    printf("Mapping program headers\n");
+    for (i=0; i < elf_hdr->e_phnum ; i++) {
+        if (phdr[i].p_type == PT_LOAD) {
+            printf("\tloading %p (%8p bytes, offset %8p ", phdr[i].p_vaddr+(size_t)offset, phdr[i].p_memsz, phdr[i].p_offset);
+            if (phdr[i].p_memsz < phdr[i].p_filesz)
+                printf("phdr.p_memsz < phdr.p_filesz\n");
+
+            //get memory protection
+            int prot = 0;
+            if (phdr[i].p_flags & PF_R) prot |= PROT_READ, printf("r"); else printf("-");
+            if (phdr[i].p_flags & PF_W) prot |= PROT_WRITE, printf("w"); else printf("-");
+            if (phdr[i].p_flags & PF_X) prot |= PROT_EXEC, printf("x");  else printf("-");
+            printf(")\n");
+
+            //map memory and copy data
+            if (phdr[i].p_vaddr & (getpagesize()-1)) {
+                printf("\tInvalid alignment\n");
+            }
+            else {
+                int fd = open(fname, O_RDONLY, 0);
+                //mmap_handler((void *)phdr[i].p_vaddr+(size_t)offset, phdr[i].p_memsz, prot, MAP_PRIVATE, fd, phdr[i].p_offset);
+                mmap_handler((void *)phdr[i].p_offset+(size_t)offset, phdr[i].p_memsz, prot, MAP_PRIVATE, fd, phdr[i].p_offset);
+                close(fd);
+            }
+
+        }
+        else if (phdr[i].p_type == PT_TLS) {
+            printf("Found TLS Section %p (%8p bytes, offset %8p ", phdr[i].p_vaddr, phdr[i].p_memsz, phdr[i].p_offset);
+            int prot = 0;
+            if (phdr[i].p_flags & PF_R) prot |= PROT_READ, printf("r"); else printf("-");
+            if (phdr[i].p_flags & PF_W) prot |= PROT_WRITE, printf("w"); else printf("-");
+            if (phdr[i].p_flags & PF_X) prot |= PROT_EXEC, printf("x");  else printf("-");
+            printf(")\n");
+
+            printf("Target FS Base: 0x4aa880\n");
+
+            hexdump(elf_file + phdr[i].p_offset, phdr[i].p_filesz);
+          }
+    }
 }
 
-int main(int argc, char **argv) {
+void load_corefile(char *fname) {
     int core_size, fd;
-    void *core_file = load_file(argv[1], &core_size);
+    void *core_file = load_file(fname, &core_size);
     #ifdef __x86_64__
         Elf64_Ehdr *core_elf_hdr = core_file;
     #endif
 
     print_notes(core_file);
-    load_mapped_files(core_file);
-    map_core_phdr(core_file);
+    print_auvx(core_file);
+    //load_mapped_files(core_file);
+    munmap(NULL,0);
+
+    //Loading Binary
+    char *exec_fname = translate_ptr(core_file, get_auvx(core_file, AT_EXECFN));
+    printf("Exec filename: %s\n", exec_fname);
+    void *binary_base = get_auvx(core_file, AT_PHDR) - sizeof(*core_elf_hdr);
+    load_elf(exec_fname, binary_base);
+
+    //mapping interpreter
+    void *ld_base = get_auvx(core_file, AT_BASE);
+    if (ld_base){
+        printf("Found interpreter %p\n", ld_base);
+        load_elf("/usr/lib/ld-2.28.so", ld_base);
+        load_elf("/usr/lib/libc-2.28.so", (void *)0x00007ffff7da7000);
+    }
 
     //ucontext_t ctx; //XXX
     struct sigret_ctx sigret_ctx;
     memset(&sigret_ctx, 0x00, sizeof(sigret_ctx));
     load_prstatus(core_file, &sigret_ctx);
+    map_core_phdr(core_file);
 
-    print_auvx(core_file);
 
-    //XXX will be overwritten without ASLR
-    char *exec_fname = get_auvx(core_file, AT_EXECFN);
-    printf("Exec filename: %s\n", exec_fname);
-
-    //mapping binary base aka phdr table
-    void *binary_base = get_auvx(core_file, AT_PHDR) - sizeof(*core_elf_hdr);
-    //printf("Loading %s Base at offset %p\n", exec_fname, binary_base);
-    //fd = open(exec_fname, O_RDONLY, 0);
-    //mmap_handler(binary_base, getpagesize(), PROT_READ, MAP_PRIVATE, fd, 0);
-    //close(fd);
-    load_elf(exec_fname, binary_base);
-
-    //mapping interpreter
-    //void *ld_base = get_auvx(core_file, AT_BASE);
-    //load_elf("/usr/lib/ld-2.28.so", ld_base);
-
-    //load_elf("/usr/lib/libc-2.28.so", (void *)0x00007ffff7da8000);
 
     printf("Sigreturn...\n");
     sigret(&sigret_ctx);
+    
+}
+
+int main(int argc, char **argv) {
+    load_corefile(argv[1]);
+
+    int uctx_size;
+    void *uctx = load_file(argv[2], &uctx_size);
+    sigret(uctx);
+    //setcontext(uctx);
+
+
+    int i;
+    ucontext_t ctx;
+    hexdump(&ctx.__fpregs_mem, sizeof(ctx.__fpregs_mem));
+    printf("%d\n", getcontext(&ctx));
+    printf("%p\n", ctx.uc_stack);
+    for (i=0; i < __NGREG;i++)
+        printf("%d: %p\n", i, ctx.uc_mcontext.gregs[i]);
+
+
+
+    //mapping binary base aka phdr table
+
+
 }
