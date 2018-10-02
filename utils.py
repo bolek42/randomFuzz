@@ -102,9 +102,10 @@ class executor:
             r = r2pipe.open(coredump[0])
             os.unlink(coredump[0])
             ret = r.cmd("dr")
-            print ret
-            pc = re.findall("rip.*=.*0x[0-9a-f]*",ret)[0]
-            return re.findall("0x[0-9a-f]*",pc)[0]
+            return ret
+            #print ret
+            #pc = re.findall("rip.*=.*0x[0-9a-f]*",ret)[0]
+            #return re.findall("0x[0-9a-f]*",pc)[0]
 
         return False
 

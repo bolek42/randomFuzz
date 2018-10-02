@@ -98,6 +98,11 @@ void load_core_phdr(void *elf_file) {
             print_ptr(phdr[i].p_vaddr);
             print(" ");
 
+            if (phdr[i].p_vaddr & (((size_t)1)<<(sizeof(void*)*8-1))) {
+                print("Skipping kernel addr\n");
+                continue;
+            }
+
             mprotect((void *)phdr[i].p_vaddr, phdr[i].p_memsz, PROT_READ|PROT_WRITE);
 
             //get memory protection
