@@ -6,7 +6,7 @@ _start:
 
     //config
     mov $0xdead0000, %r15    ;//page addr
-    mov $0xe000, %r14        ;//page size
+    mov $0xf000, %r14        ;//page size
     xor %rax, %rax
 
     //open(argv[1], O_RDONLY);

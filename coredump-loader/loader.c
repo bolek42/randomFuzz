@@ -9,16 +9,27 @@
 #include <sys/procfs.h> //struct elf_prstatus
 #include <signal.h> //struct sigcontext
 #include <ucontext.h> //ucontext_t
+#include <signal.h>
 
 #define core_base ((void *)0xbeef0000)
+#define debug 1
 
-void print_ptr(size_t p);
-#define print(x) {char _x[] = x; write(1, (_x), strlen(_x));}
+void _print_ptr(size_t p);
+
+#if debug
+    #define print_ptr(x) _print_ptr((size_t)x)
+    #define print(x) {char _x[] = x; write(1, (_x), strlen(_x));}
+#else
+    #define print_ptr(x) 
+    #define print(x) 
+#endif
 
 
 #define round8(x) (((x)%8 == 0) ? (x) : (x)+8-(x)%8)
 void load_core_phdr(void *elf_file);
 void load_prstatus(void *core_file);
+void pivot_restore();
+void restore();
 
 void _start(int argc, char **argv) {
     print("Hello \\o/\n");
@@ -38,7 +49,22 @@ void _start(int argc, char **argv) {
     void *page = mmap(core_base, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
     print("Mapped @ "); print_ptr((size_t)page); print("\n");
 
+    restore();
+}
+
+void pivot_restore(){
+    asm("call get_rip; get_rip: pop %rax; mov $0xffff, %rbx; xor $-1, %rbx; and %rbx, %rax; add $0xf000, %rax; mov %rax, %rsp");
+    restore();
+}
+
+void restore() {
+    void **ptr = 0x7fffffffdba8;
+
     load_core_phdr(core_base);
+    print_ptr(*ptr);print("\n");
+    *ptr = pivot_restore;
+    print_ptr(*ptr);print("\n");
+
     load_prstatus(core_base);
 
     exit(0);
@@ -60,7 +86,7 @@ size_t strlen(const char *s) {
     return i;
 }
 
-void print_ptr(size_t p) {
+void _print_ptr(size_t p) {
     char chars[] = "0123456789abcdef";
     char prefix[] = "0x";
     char not_skip_prefix = 0;
@@ -80,6 +106,7 @@ asm ("close:    mov $0x03, %rax; syscall; ret");
 asm ("lseek:    mov $0x08, %rax; syscall; ret");
 asm ("mmap:     mov $0x09, %rax; mov %rcx, %r10; syscall; ret");
 asm ("mprotect: mov $0x0a, %rax; syscall; ret");
+asm ("munmap:   mov $0x0b, %rax; syscall; ret");
 asm ("exit:     mov $0x3c, %rax; syscall; ret");
 void sigret(void *arg) { asm("mov %rdi, %rsp; mov $0xf, %rax; syscall");}
 

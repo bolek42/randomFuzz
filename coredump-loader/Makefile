@@ -1,6 +1,6 @@
-.PHONY: all test inject loader hello getexec final
+.PHONY: all test inject loader hello getexec final trampolin
 
-all: test getexec loader final
+all: getexec hello inject trampolin loader final
 
 old:
 	gcc -o loader loader.c  -Wl,-Ttext-segment=0x1000000 -static
@@ -25,14 +25,14 @@ hello:
 	objcopy -O binary --only-section=.text hello hello.bin
 	./hello
 
-inject: hello
+inject: #hello
 	clear
 	gcc inject.c -o inject
 	./inject test/test-64-static hello.bin
 	chmod +x patched.elf
 	gdb -q ./patched.elf -ex "r" -ex q
 
-trampolin: inject
+trampolin: #inject
 	clear
 	gcc trampolin.s -o trampolin -nostdlib -fno-stack-protector
 	objdump -d trampolin
@@ -42,7 +42,7 @@ trampolin: inject
 	#strace ./patched.elf hello.bin
 	gdb -q ./patched.elf -ex "b main" -ex "r hello.bin" -ex c -ex q
 
-loader: trampolin
+loader: #trampolin
 	clear
 	gcc loader.c -o loader -nostdlib -fno-stack-protector
 	objcopy -O binary --only-section=.text loader loader.bin
@@ -54,6 +54,6 @@ loader: trampolin
 
 
 final:
-	./execute_corefile_toplevel test/test-64-static.core
+	#./execute_corefile_toplevel test/test-64-static.core
 	./execute_corefile_toplevel test/test-64-dyn.core
 
