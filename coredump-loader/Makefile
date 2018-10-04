@@ -53,6 +53,7 @@ loader: #trampolin
 	./patched.elf loader.bin test/test-64-dyn.core
 
 tracer: loader
+	./execute_corefile_toplevel test/test-64-dyn.core
 	python2 create_tracepoints.py test/test-64-dyn.core tracepoints.bin
 	./patched.elf loader.bin test/test-64-dyn.core tracepoints.bin
 

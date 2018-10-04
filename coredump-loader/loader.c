@@ -28,11 +28,13 @@ void _print_ptr(size_t p);
 #endif
 
 void init_tracer(char *fname);
+void create_breakpoints();
+void tracer_register();
+void tracer_postprocess();
 
 #define round8(x) (((x)%8 == 0) ? (x) : (x)+8-(x)%8)
 void load_core_phdr(void *elf_file);
 void load_prstatus(void *core_file);
-void pivot_restore();
 void restore();
 
 void _start(int argc, char **argv) {
@@ -50,31 +52,20 @@ void _start(int argc, char **argv) {
     fd=open(argv[2], O_RDONLY);
     size = lseek(fd, 0, SEEK_END); lseek(fd, 0, SEEK_SET);
     page = mmap(core_base, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
-    close(fd);
     print("Coredump "); write(1, argv[2], strlen(argv[2]));
     print(" mapped @ "); print_ptr((size_t)page); print("\n");
 
-    //if (argc == 4) init_tracer(argv[3]);
+    init_tracer(argv[3]);
+    load_core_phdr(core_base);
+    create_breakpoints();
 
-    restore();
-}
-
-void pivot_restore(){
-    asm("call get_rip; get_rip: pop %rax; mov $0xffff, %rbx; xor $-1, %rbx; and %rbx, %rax; add $0xf000, %rax; mov %rax, %rsp");
     restore();
 }
 
 void restore() {
-    void **ptr = (void *)0x7fffffffdba8;
-
-    load_core_phdr(core_base);
-    print_ptr(*ptr);print("\n");
-    //*ptr = pivot_restore;
-    print_ptr(*ptr);print("\n");
-
+    //reset stack
+    asm("call get_rip; get_rip: pop %rax; mov $0xffff, %rbx; xor $-1, %rbx; and %rbx, %rax; add $0xf000, %rax; mov %rax, %rsp");
     load_prstatus(core_base);
-
-    exit(0);
 }
 
 void *memcpy(void *dest, const void *src, size_t n) {
@@ -88,6 +79,7 @@ void *memset(void *s, int c, size_t n) {
 }
 
 size_t strlen(const char *s) {
+    if (!s) return 0;
     int i;
     for (i=0; s[i]; i++);
     return i;
@@ -108,6 +100,7 @@ void _print_ptr(size_t p) {
     if (!not_skip_prefix) write(1, &chars[0], 1);
 }
 
+asm ("read:      mov $0x00, %rax; syscall; ret");
 asm ("write:     mov $0x01, %rax; syscall; ret");
 asm ("open:      mov $0x02, %rax; syscall; ret");
 asm ("close:     mov $0x03, %rax; syscall; ret");
@@ -116,11 +109,13 @@ asm ("mmap:      mov $0x09, %rax; mov %rcx, %r10; syscall; ret");
 asm ("mprotect:  mov $0x0a, %rax; syscall; ret");
 asm ("munmap:    mov $0x0b, %rax; syscall; ret");
 asm ("sigaction: mov $0x0d, %rax; mov $0x8, %r10; syscall; ret");
-asm ("exit:      mov $0x3c, %rax; syscall; ret");
-void sigret(void *arg) { asm("mov %rdi, %rsp; mov $0xf, %rax; syscall");}
 asm ("sigreturn: mov $0x0f, %rax; syscall");
+asm ("exit:      mov $0x3c, %rax; syscall; ret");
 //Also Jump to Sigret for child
 asm ("clone:     mov $0x38, %rax; mov %rcx, %r10; syscall; cmp $0x00, %rax; je sigreturn; ret");
+asm ("fork:      mov $0x39, %rax; syscall; ret;");
+asm ("wait4:     mov $0x3d, %rax; syscall; ret;");
+void sigret(void *arg) { asm("mov %rdi, %rsp; mov $0xf, %rax; syscall");}
 
 void load_core_phdr(void *elf_file) {
     int i, ret;
@@ -165,27 +160,6 @@ void load_core_phdr(void *elf_file) {
 void exit_thread() {
     print("exit thread sighandler\n")
     exit(0);
-}
-
-#define SA_RESTORER 0x04000000
-//The original sigaction struct has _sa_mask after sa_handler
-//as this has changed with rt_sigaction, here is the redefinition
-struct rt_sigaction {
-	void * _sa_handler;
-	unsigned long sa_flags;
-	void * sa_restorer;
-	unsigned long _sa_mask;
-};
-
-void register_signal(int sig, void *sighandler, void *restorer) {
-    struct rt_sigaction action;
-    memset(&action, 0, sizeof(action));
-    action._sa_handler = sighandler;
-    action._sa_mask |= 1<<(sig-1);
-    action.sa_flags = SA_RESTART;
-    if (restorer) action.sa_flags |= SA_RESTORER;
-    action.sa_restorer = restorer;
-    sigaction(sig, &action, NULL);
 }
 
 
@@ -278,16 +252,27 @@ void load_prstatus(void *core_file){
         note_ptr += round8(note_hdr->n_descsz);
         note_hdr = note_ptr;
     }
+    
+    int pid = fork();
 
-    print("Sigreturn...\n");
-    register_signal(SIGTERM, &exit_thread, &exit_thread);
-    for (tid=1; tid < n_threads; tid++) {
-        clone(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM, &sigret_ctx[tid], NULL, NULL);
+    if (pid == 0) {
+        print("Sigreturn...\n");
+        tracer_register();
+        //register_signal(SIGTERM, &exit_thread, &exit_thread);
+        for (tid=1; tid < n_threads; tid++) {
+            clone(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM, &sigret_ctx[tid], NULL, NULL);
+        }
+
+        //register_signal(SIGTERM, &pivot_restore, &pivot_restore);
+        sigret(&sigret_ctx[0]);
     }
-
-    register_signal(SIGTERM, &pivot_restore, &pivot_restore);
-    sigret(&sigret_ctx[0]);
-
+    else {
+        wait4(pid, NULL, 0, NULL);
+        print("Child Exit\n");
+        tracer_postprocess();
+        //exit(0);
+        restore();
+    }
 }
 
 //  _                           
@@ -303,9 +288,23 @@ void load_prstatus(void *core_file){
 asm ("kill:      mov $0x3e, %rax; syscall; ret");
 asm ("getpid:    mov $0x27, %rax; syscall; ret");
 
+void init_tracer(char *fname) {
+    int fd, size;
+    void *page;
 
-
-/*
+    fd=open(fname, O_RDONLY);
+    if (fd < 0) {
+        print("No tracepoints found\n");
+        mmap(breakpoints, 0x1000, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+        return;
+    }
+    size = lseek(fd, 0, SEEK_END); lseek(fd, 0, SEEK_SET);
+    page = mmap(breakpoints, size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+    read(fd, page, size);
+    close(fd);
+    print("Tracepoints "); write(1, fname, strlen(fname));
+    print(" loaded @ "); print_ptr((size_t)page); print("\n");
+}
 
 void *translate_ptr(void *elf_file, void *ptr) {
     int i;
@@ -322,74 +321,98 @@ void *translate_ptr(void *elf_file, void *ptr) {
     return NULL;
 }
 
-void sighandler(int sig, siginfo_t *siginfo) {
-    //print("Got Signal ");
-    //print_ptr(sig);
-    //print("\n");
-}
-
-
-
-void sigreturn_wrap(ucontext_t *sigret_ctx) {
-    struct sigcontext *regsig = &sigret_ctx->uc_mcontext.gregs;
-    regsig->rip -= 1;
-    print("SIGTRAP @ ");print_ptr(regsig->rip); print("\n");
-
+void write_code(void *pc, char value) {
     //get page
     #ifdef __x86_64__
         Elf64_Ehdr *elf_hdr = core_base;
         Elf64_Phdr *phdr = core_base + elf_hdr->e_phoff;
     #endif
 
+    //Searching for Page, that hit the breakpoint
     for (int i=0; i < elf_hdr->e_phnum ; i++)
         if (phdr[i].p_type == PT_LOAD)
-            if (phdr[i].p_vaddr <= regsig->rip && phdr[i].p_vaddr + phdr[i].p_memsz > regsig->rip) {
-                print("Found Page\n");
+            if (phdr[i].p_vaddr <= pc && phdr[i].p_vaddr + phdr[i].p_memsz > pc) {
+                //print("Found Page\n");
                 phdr = &phdr[i];
                 break;
             }
 
-    //remove breakpoint
-    for (int i=0; i < breakpoints[0]; i++) {
-        if (breakpoints[2*i+1] == regsig->rip) {
-            char val_orig = breakpoints[2*i+2] & 0xff;
-            char *brk = translate_ptr(core_base, regsig->rip);
-            *brk = val_orig;
-            print_ptr(val_orig&0xff); print("\n");
+    //get protection
+    int prot = 0;
+    if (phdr->p_flags & PF_R) prot |= PROT_READ;
+    if (phdr->p_flags & PF_W) prot |= PROT_WRITE;
+    if (phdr->p_flags & PF_X) prot |= PROT_EXEC;
 
-            mprotect(phdr->p_vaddr, phdr->p_memsz, PROT_READ|PROT_WRITE);
-            print_ptr(*((char *)regsig->rip) & 0xff);print("\n");
-            *((char *)regsig->rip) = val_orig;
-            print_ptr(*((char *)regsig->rip) & 0xff);print("\n");
-            mprotect(phdr->p_vaddr, phdr->p_memsz, PROT_READ|PROT_EXEC);
-            break;
-        }
-    }
+    //restore value
+    mprotect(phdr->p_vaddr, phdr->p_memsz, PROT_READ|PROT_WRITE);
+    *((char *)pc) = value & 0xff;
+    mprotect(phdr->p_vaddr, phdr->p_memsz, prot);
 }
 
-void _sigreturn_wrap();
-asm ("_sigreturn_wrap: mov %rsp, %rdi; call sigreturn_wrap; mov $0xf, %rax; syscall");
-
-
-void init_tracer(char *fname) {
-    int fd, size;
-    void *page;
-
-    fd=open(fname, O_RDONLY);
-    size = lseek(fd, 0, SEEK_END); lseek(fd, 0, SEEK_SET);
-    page = mmap(breakpoints, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
-    close(fd);
-    print("Tracepoints "); write(1, fname, strlen(fname));
-    print(" mapped @ "); print_ptr((size_t)page); print("\n");
-
-    reg_signal();
-
+void create_breakpoints() {
     print("Creating "); print_ptr(breakpoints[0]); print(" Breakpoints\n");
-
     for (int i=0; i < breakpoints[0]; i++) {
-        //print_ptr(breakpoints[2*i+1]); print("\n");
-        char *brk = translate_ptr(core_base, breakpoints[2*i+1]);
-        *brk = 0xcc;
+        print("Added Breakpoint "); print_ptr(breakpoints[i+1]); print("\n");
+        char *brk = translate_ptr(core_base, breakpoints[i+1]);
+        write_code(breakpoints[i+1], 0xcc);
+        breakpoints[i+1] = 0;
     }
+    breakpoints[0] = 0;
 }
-*/
+
+void tracer_postprocess() {
+    print("Postprocess\n");
+    for (int i=0; i < breakpoints[0]; i++) {
+        print("Found new tracepoint "); print_ptr(breakpoints[i+1]); print("\n");
+        char *val_orig = translate_ptr(core_base, breakpoints[i+1]);
+        write_code(breakpoints[i+1], *val_orig);
+        breakpoints[i+1] = 0;
+    }
+    breakpoints[0] = 0;
+}
+
+#define SA_RESTORER 0x04000000
+//The original sigaction struct has _sa_mask after sa_handler
+//as this has changed with rt_sigaction, here is the redefinition
+struct rt_sigaction {
+	void * _sa_handler;
+	unsigned long sa_flags;
+	void * sa_restorer;
+	unsigned long _sa_mask;
+};
+
+void register_signal(int sig, void *sighandler, void *restorer) {
+    struct rt_sigaction action;
+    memset(&action, 0, sizeof(action));
+    action._sa_handler = sighandler;
+    action._sa_mask |= 1<<(sig-1);
+    action.sa_flags = SA_RESTART;
+    if (restorer) action.sa_flags |= SA_RESTORER;
+    action.sa_restorer = restorer;
+    sigaction(sig, &action, NULL);
+}
+
+void breakpoint_handler(ucontext_t *sigret_ctx) {
+    struct sigcontext *regsig = &sigret_ctx->uc_mcontext.gregs;
+    regsig->rip -= 1;
+    print("SIGTRAP @ "); print_ptr(regsig->rip); print("\n");
+
+    //delte breakpoint
+    char *val_orig = translate_ptr(core_base, regsig->rip);
+    write_code(regsig->rip, *val_orig);
+
+    //track breakpoint XXX not threadsafe
+    breakpoints[breakpoints[0]+1] = regsig->rip;
+    breakpoints[0] ++;
+}
+
+void sigreturn_wrap();
+asm ("sigreturn_wrap: mov %rsp, %rdi; call breakpoint_handler; mov $0xf, %rax; syscall");
+
+
+void dummy() {}
+void tracer_register() {
+    register_signal(SIGTRAP, dummy, &sigreturn_wrap);
+}
+
+

@@ -30,7 +30,7 @@ int main() {
     pthread_mutex_unlock(&mutex);
     sleep(1);
     printf("SIGTERM\n");
-    kill(getpid(), SIGTERM);
+    //kill(getpid(), SIGTERM);
     sleep(1);
     printf("main exit\n");
 }
