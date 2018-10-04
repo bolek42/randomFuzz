@@ -1,6 +1,64 @@
+# How to firmware
+Qemu System
+    Hard to implement
+    Can do memmap I/O
 
+Qemu User
+    Easy to setup
+    No memmap I/O
+    Performance?!
+
+Native
+    Better performance
+    Less usability
+
+Breakpoints
+    Patch code
+        call breakpoint_func
+            push registers
+            notify userspace
+
+Want to Have:
+    gdb for firmware
+    gdb internal fuzzer
+        set breakpoit    
+        define target
+        run
+
+
+
+
+# Writing Shellcode in C
+We can write C Code, that is fully independent
+Extra Page Code + Stack
+
+
+```bash
+gcc hello.c -o hello -static -nostdlib -fno-stack-protector 
+readelf -l hello
+objdump -d hello
+./hello
+```
+
+```
+#include <stddef.h>
+
+void write(int fd, char *buf, size_t size);
+void exit();
+
+void _start() {
+    char str[] = "asd";
+    write(1, str, 4); 
+    exit();
+}
+
+asm ("exit: mov $0x3c, %rax; mov $0x00, %rdi; syscall;");
+asm ("write: mov $0x1, %rax; syscall; ret");
+
+```
 
 # Setting the fs Base
+Deprecated - Use Main Hook + Restore
 
     init_tls //Thread Local Storage
 
@@ -36,31 +94,6 @@ no other bointers to fs_base
 
 #Injecting New PHDR
 Overwriting rela.plt (directly after phdrs)
-causes
+Needs Reallocation - Difficult
+    => Overwriting Main
 
-
-
-# Writing Shellcode in C
-```bash
-gcc hello.c -o hello -static -nostdlib -fno-stack-protector 
-readelf -l hello
-objdump -d hello
-./hello
-```
-
-```
-#include <stddef.h>
-
-void write(int fd, char *buf, size_t size);
-void exit();
-
-void _start() {
-    char str[] = "asd";
-    write(1, str, 4); 
-    exit();
-}
-
-asm ("exit: mov $0x3c, %rax; mov $0x00, %rdi; syscall;");
-asm ("write: mov $0x1, %rax; syscall; ret");
-
-```
