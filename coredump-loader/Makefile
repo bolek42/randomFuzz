@@ -1,4 +1,4 @@
-.PHONY: all test inject loader hello getexec final trampolin
+.PHONY: all test inject loader hello getexec final trampolin tracer
 
 all: getexec hello inject trampolin loader final
 
@@ -46,11 +46,15 @@ loader: #trampolin
 	clear
 	gcc loader.c -o loader -nostdlib -fno-stack-protector
 	objcopy -O binary --only-section=.text loader loader.bin
-	./inject test/test-64-static trampolin.bin
+	./inject test/test-64-dyn trampolin.bin
 	chmod +x patched.elf
-	gdb -q ./patched.elf -ex "r loader.bin test/test-64-static.core" -ex q
-	#strace ./patched.elf loader.bin test/test-64-static.core
-	./patched.elf loader.bin test/test-64-static.core
+	#gdb -q ./patched.elf -ex "r loader.bin test/test-64-static.core" -ex q
+	#strace ./patched.elf loader.bin test/test-64-dyn.core
+	./patched.elf loader.bin test/test-64-dyn.core
+
+tracer: loader
+	python2 create_tracepoints.py test/test-64-dyn.core tracepoints.bin
+	./patched.elf loader.bin test/test-64-dyn.core tracepoints.bin
 
 
 final:
