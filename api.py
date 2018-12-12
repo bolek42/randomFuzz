@@ -12,10 +12,18 @@ class api:
         pass
 
     def recv(self, s):
-        n = struct.unpack('<I',s.recv(4))[0]
+        while True:
+            try: #error: [Errno 4] Interrupted system call
+                n = struct.unpack('<I',s.recv(4))[0]
+                break
+            except:
+                pass
         d = ""
         while len(d) < n:
-            d += s.recv(n-len(d))
+            try:
+                d += s.recv(n-len(d))
+            except:
+                pass
         return json.loads(d)
 
     def send(self, s, data):
@@ -34,9 +42,12 @@ class api:
         s.setblocking(1)
         self.sock = s
         while True:
-            conn, addr = s.accept()
-            self.connections += [conn]
-            Thread(target=self.client_handler, args=(conn,)).start()
+            try:
+                conn, addr = s.accept()
+                self.connections += [conn]
+                Thread(target=self.client_handler, args=(conn,)).start()
+            except:
+                pass
 
     def client_handler(self, conn):
         print "worker connected"
@@ -55,18 +66,20 @@ class api:
         #add known testcases
         testcases = []
         last_tid = 0
-        for i in xrange(last_tid):
-            if not os.path.exists("%s/testcase-%d.json" % (self.seed, i)):
+        while True:
+            if not os.path.exists("%s/testcase-%d.json" % (self.seed, last_tid)):
                 break
-            with open("%s/testcase-%d.json" % (self.seed, i), "r") as f:
+            with open("%s/testcase-%d.json" % (self.seed, last_tid), "r") as f:
                 testcases += [b64encode(f.read())]
-                last_tid += 1
+            last_tid += 1
         provision["testcases"] = b64encode(json.dumps(testcases))
 
         #add files
         provision["files"] = {}
+        print self.files
         for fname in self.files:
-            f = open(fname, "rb")
+            print fname
+            f = open("files/"+fname, "rb")
             provision["files"][fname] = b64encode(f.read())
             f.close()
 
