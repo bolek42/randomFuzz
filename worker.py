@@ -59,7 +59,7 @@ class worker(api):
             for t in update["testcase_update"]:
                 pid = t["parent_id"]
                 self.testcases += [t]
-                if t["id"] > 0:
+                if t["id"] > 0 and t["id"] < len(self.testcases):
                     self.testcases[pid]["childs"] += [t["id"]]
 
             self.mutator.random_merge_cache = {}
@@ -83,7 +83,8 @@ class worker(api):
         try:
             data = self.mutator.mutate_seed(testcase, self.seed_data)
             stderr, crash, coverage = self.executor.call(data, self.ext)
-            self.process_result(testcase, stderr, crash, coverage, data)
+            if len(coverage) > 0:
+                self.process_result(testcase, stderr, crash, coverage, data)
         except:
             import traceback; traceback.print_exc()
             pass
@@ -96,7 +97,6 @@ class worker(api):
         #detect new crash
         if crash and crash not in self.crash:
             print "New crash %s" % crash
-            print testcase["bin"]
             testcase["crash"] = crash
             testcase["stderr"] = stderr
             self.testcase_report.put(testcase)

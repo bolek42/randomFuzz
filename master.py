@@ -32,7 +32,7 @@ class master(api):
         #global config
         self.cmd = cfg["cmd"]
         self.env = cfg["env"]
-        self.files = []
+        self.files = cfg["files"]
         self.crash_id = 0
         if os.path.exists("crash.json"):
             self.crash = load_json("crash.json")
@@ -138,6 +138,13 @@ class master(api):
             pass
 
     def process_report(self):
+        try:
+            self._process_report()
+        except:
+            import traceback; traceback.print_exc()
+            os.kill(os.getpid(), 9)
+
+    def _process_report(self):
         print "update processor started"
         while True:
             testcase = self.report_queue.get()
@@ -172,8 +179,9 @@ class master(api):
                 self.testcases.append(testcase)
 
                 pid = testcase["parent_id"]
-                self.testcases[pid]["childs"] += [testcase["id"]]
-                save_json("%s/testcase-%d.json" % (self.seed, pid),self.testcases[pid])
+                if testcase["id"] > 0 and len(self.testcases) < testcase["id"]:
+                    self.testcases[pid]["childs"] += [testcase["id"]]
+                    save_json("%s/testcase-%d.json" % (self.seed, pid),self.testcases[pid])
                 self.save_status()
 
             #handle new crash
@@ -219,7 +227,7 @@ class master(api):
             print "Worker: %d" % self.connected_worker.value
             print "Report Queue: %d" % self.report_queue.qsize()
             t = time.time() - self.t0
-            print "Time: %dd:%dh:%dm:%ds" %((t/3600/24), (t/3600)%60, (t/60)%60, t%60)
+            print "Time: %dd:%dh:%dm:%ds" %((t/3600/24)%356, (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"
             covered = len(self.coverage)
             print "%d covered" % (covered)
@@ -228,19 +236,19 @@ class master(api):
             for message in self._log[-16:]:
                 print message
             t = time.time()
-            print "%dd %02dh %02dm %02ds" %((t/3600/24)%365, (t/3600)%60, (t/60)%60, t%60)
+            print "%dd:%dh:%dm:%ds" %((t/3600/24)%365, (t/3600)%60, (t/60)%60, t%60)
 
             if log_old != self._log[-1]:
                 last_event = time.time()
                 log_old = self._log[-1]
 
-            if time.time() - last_event > 100 and len(self.testcases) == 0:
-                last_event = time.time()
-                self.stop()
+            #if time.time() - last_event > 100 and len(self.testcases) == 0:
+            #    last_event = time.time()
+            #    self.stop()
 
-            if time.time() - last_event > 1800:
-                last_event = time.time()
-                self.stop()
+            #if time.time() - last_event > 1800:
+            #    last_event = time.time()
+            #    self.stop()
 
             self.apply_update()
 

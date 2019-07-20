@@ -7,7 +7,7 @@ import json
 from random import getrandbits
 import re
 import sys
-import r2pipe
+import pwn
 
 #watchdog terminates processes after timeout
 #and delete left files
@@ -60,19 +60,16 @@ class executor:
         os.chdir(workdir)
         self.watchDog = watchDog()
         self.cmd = cmd
+        pwn.context.log_level = 'error'
 
     def call(self, data, ext):
         prefix = "t-%016x" % getrandbits(64)
-        fname = "%s.%s" % (prefix, ext)
-        with open( fname, "w") as f:
-            f.write(data)
 
-        cmd = (self.cmd % fname).split(" ")
-        cmd = ["qemu-x86_64", "-trace", "translate_block,file=%s" % prefix] + cmd
+        cmd = ["qemu-arm", "-trace", "translate_block,file=%s" % prefix, self.cmd]
         p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
         self.watchDog.start(p.pid)
 
-        stdout, stderr = p.communicate(input="")
+        stdout, stderr = p.communicate(input=data)
 
         cov = self.coverage(prefix)
         crash = self.coredump(p.pid)
@@ -84,28 +81,60 @@ class executor:
 
     def coverage(self, fname):
         f = open(fname, "r")
-        cov = []
+        path = []
         for line in f:
             try:
                 pc = re.findall("pc:0x[0-9a-f]*",line)[0][3:]
-                cov += [int(pc,16)]
+                path += [int(pc,16)]
             except:
                 print line
                 import traceback; traceback.print_exc()
 
         f.close()
-        return set(cov)
+        if len(path) < 2:
+            return []
+
+        return set(path) #XXX we use bb only for evaluation
+
+        edges = []
+        prev = path[0]
+        for node in path[1:]:
+            edge = prev << 32 | node
+            edges += [edge]
+
+        return set(edges)
 
     def coredump(self, pid):
-        coredump = glob.glob("qemu_*_%d.core" % pid)
+        binary = os.path.basename(self.cmd)
+        coredump = glob.glob("qemu_%s_*_%d.core" % (binary,pid))
         if len(coredump) != 0:
-            r = r2pipe.open(coredump[0])
-            os.unlink(coredump[0])
-            ret = r.cmd("dr")
-            return ret
-            #print ret
-            #pc = re.findall("rip.*=.*0x[0-9a-f]*",ret)[0]
-            #return re.findall("0x[0-9a-f]*",pc)[0]
+            try:
+                c = pwn.Coredump(coredump[0])
+                ret = ""
+                ret += "pc=0x%x"%c.prstatus.pr_reg.pc
+                ret += "lr=0x%x"%c.prstatus.pr_reg.lr
+                #ret += "r0=0x%x"%c.prstatus.pr_reg.r0
+                #ret += "r1=0x%x"%c.prstatus.pr_reg.r1
+                #ret += "r2=0x%x"%c.prstatus.pr_reg.r2
+                #ret += "r3=0x%x"%c.prstatus.pr_reg.r3
+                #ret += "r4=0x%x"%c.prstatus.pr_reg.r4
+                #ret += "r5=0x%x"%c.prstatus.pr_reg.r5
+                #ret += "r6=0x%x"%c.prstatus.pr_reg.r6
+                #ret += "r7=0x%x"%c.prstatus.pr_reg.r7
+                #ret += "r8=0x%x"%c.prstatus.pr_reg.r8
+                #ret += "r9=0x%x"%c.prstatus.pr_reg.r9
+                #ret += "r10=0x%x"%c.prstatus.pr_reg.r10
+                #ret += "r11=0x%x"%c.prstatus.pr_reg.r11
+                #ret += "r12=0x%x"%c.prstatus.pr_reg.r12
+                os.unlink(coredump[0])
+                pc = c.prstatus.pr_reg.pc
+                del c
+
+                #if pc > 0xbeef000 and pc < 0xbeef000 + 10*1024 : #XXX
+                #    return False
+                return ret
+            except:
+                import traceback; traceback.print_exc() 
 
         return False
 
