@@ -184,6 +184,9 @@ class master(api):
                     save_json("%s/testcase-%d.json" % (self.seed, pid),self.testcases[pid])
                 self.save_status()
 
+                with open("%s/coverage.csv" % self.seed, "a") as f:
+                    f.write("%d, %d\n" % (self.total_testcases, len(self.coverage)))
+
             #handle new crash
             new_crash = False
             if "crash" in testcase:
@@ -208,7 +211,7 @@ class master(api):
         log_old = ""
         while True:
             time.sleep(1)
-            
+            self.apply_update()
             #determine testaces per second
             stop = time.time()
             alpha =  0.5
@@ -250,7 +253,6 @@ class master(api):
             #    last_event = time.time()
             #    self.stop()
 
-            self.apply_update()
 
     def log(self, msg):
         t = time.time() 

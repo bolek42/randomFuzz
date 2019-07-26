@@ -203,7 +203,7 @@ class worker(api):
 
             #mutate
             if tid == 0:
-                mutated = self.mutator.random_mutation(testcase ,maximum=8, mutations=[0,1,2])
+                mutated = self.mutator.random_mutation(testcase ,maximum=8)
             else:
                 mutated = self.mutator.random_mutation(testcase ,maximum=8)
             mutated["parent_id"] = tid
