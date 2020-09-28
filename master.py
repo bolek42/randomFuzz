@@ -79,7 +79,10 @@ class master(api):
 
     def load_seed_state(self, seed):
         self.seed = os.path.basename(seed)
-        self.ext = seed.split(".")[-1]
+        if len(seed.split(".")) > 1:
+            self.ext = seed.split(".")[-1]
+        else:
+            self.ext = ""
 
         #seed state directory
         if not os.path.exists(self.seed):
