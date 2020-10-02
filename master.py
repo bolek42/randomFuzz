@@ -82,7 +82,7 @@ class master(api):
         if len(seed.split(".")) > 1:
             self.ext = seed.split(".")[-1]
         else:
-            self.ext = ""
+            self.ext = "bin"
 
         #seed state directory
         if not os.path.exists(self.seed):
@@ -242,7 +242,7 @@ class master(api):
             print "\nLog:"
             for message in self._log[-16:]:
                 print message
-            t = time.time()
+            t = time.time() - self.t0
             print "%dd %02dh %02dm %02ds" %((t/3600/24)%365, (t/3600)%60, (t/60)%60, t%60)
 
             if log_old != self._log[-1]:
@@ -260,7 +260,7 @@ class master(api):
             self.apply_update()
 
     def log(self, msg):
-        t = time.time() 
+        t = time.time() - self.t0
         timestamp =  "%dd %02dh %02dm %02ds" %((t/3600/24)%365, (t/3600)%60, (t/60)%60, t%60)
         self._log.append("%s %s" % (timestamp, msg))
         with open("log", "a") as f:

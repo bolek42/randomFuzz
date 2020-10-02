@@ -8,6 +8,7 @@ from random import getrandbits
 import re
 import sys
 from binascii import hexlify
+import struct
 
 #watchdog terminates processes after timeout
 #and delete left files
@@ -61,17 +62,26 @@ class executor:
         self.cmd = cmd
 
     def call_sancov(self, data, ext):
-        fname = "t-%016x.%s" % (getrandbits(64), ext)
-        #with open( fname, "w") as f:
-        #    f.write(data)
+        fname = None
+        if "%s" in self.cmd:
+            fname = "t-%016x.%s" % (getrandbits(64), ext)
 
-        cmd = (self.cmd ).split(" ")
+            with open(fname, "w") as f:
+                f.write(data)
+            cmd = (self.cmd % fname).split(" ")
+        else:
+            cmd = (self.cmd).split(" ")
+
         p = Popen(cmd, stdout=PIPE, stdin=PIPE, stderr=PIPE)
         self.watchDog.start(p.pid)
 
-        stdout, stderr = p.communicate(input=data)
+        if fname is not None:
+            stdout, stderr = p.communicate(input="")
+        else:
+            stdout, stderr = p.communicate(input=data)
+
         crash, bitsets = self.parse_asan(p.pid, stderr)
-        if os.path.exists(fname):
+        if fname is not None and os.path.exists(fname):
             os.remove(fname)
 
         return stderr, crash, bitsets
@@ -80,7 +90,17 @@ class executor:
         bitsets = {}
         for sname in glob.glob("*.%d.sancov" % (pid)):
             f = open(sname)
-            bitsets[".".join(sname.split(".")[:-2])] = int("0x1" + hexlify(f.read()),16)
+            data = f.read()
+            if struct.unpack("<Q", data[:8])[0] == 0xC0BFFFFFFFFFFF64:
+                data = map(lambda x: struct.unpack("<Q", x)[0], [data[i:i+8] for i in range(0, len(data), 8)])
+            else:
+                data = map(lambda x: struct.unpack("<I", x)[0], [data[i:i+4] for i in range(0, len(data), 4)])
+
+            cov = 0
+            for x in data:
+                cov |= 1<<( int(x) % 64385)
+
+            bitsets[".".join(sname.split(".")[:-2])] = cov
             f.close()
             os.remove(sname)
 
