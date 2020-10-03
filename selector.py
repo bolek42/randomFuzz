@@ -5,8 +5,9 @@ from shutil import copy2
 
 from utils import *
 
+from api import api
 
-class selector:
+class selector(api):
     def __init__(self, cfg, workdir):
         self.cmd = cfg["cmd"]
         for k in cfg["env"]:
@@ -16,19 +17,18 @@ class selector:
         self.executor = executor(self.cmd, self.workdir+"/run")
 
     def minimize(self, data):
-        return data #XXX
         _,_,coverage = self.executor.call(data, self.ext)
 
         l = len(data)
         blocksize = 2**(len(data)-1).bit_length()
-        while blocksize * 128 > len(data):
+        while blocksize > 128:# > len(data):
             j = 0
             while j < len(data):
                 sys.stderr.write("\rblocksize: %d len: %d/%d    " % (blocksize, len(data), l))
                 min_data = data[:j] + data[j+blocksize:]
                 _,_,c = self.executor.call(min_data, self.ext)
 
-                if c == coverage:
+                if self.compute_new_blocks(coverage, c) == 0:
                     data = min_data
                 else:
                     j += blocksize
@@ -48,7 +48,7 @@ class selector:
                         data = f.read()
 
                     self.ext = fname.split(".")[-1]
-                    #data = self.minimize(data)
+                    data = self.minimize(data)
                     fname = os.path.basename(fname)
                     with open("/tmp/minimized-%s" % fname, "wb") as f:
                         f.write(data)
@@ -69,11 +69,11 @@ class selector:
             pass
 
         #sort by size
-        coverage = set()
+        coverage = dict()
         tmp = []
         for fname,c,t,l,_ in sorted(results, key=lambda x: x[3]):
-            new_blocks = len(c - coverage)
-            coverage.update(c)
+            new_blocks = self.compute_new_blocks(c, coverage)
+            self.coverage_update(coverage, c)
 
             if new_blocks > 10:
                 tmp += [[fname, c, t, l, new_blocks]]
@@ -81,10 +81,10 @@ class selector:
         while len(results) > count + 10:
             #sort results by new blocks
             results = []
-            coverage = set()
+            coverage = dict()
             for fname, c, t, l, new_blocks in sorted(tmp, key=lambda x: x[4], reverse=True)[:-1]:
-                new_blocks = len(c - coverage)
-                coverage.update(c)
+                new_blocks = self.compute_new_blocks(c, coverage)
+                self.coverage_update(coverage, c)
 
                 if new_blocks > 10:
                     results += [[fname, c, t, l, new_blocks]]

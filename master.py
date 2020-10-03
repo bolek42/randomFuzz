@@ -46,6 +46,8 @@ class master(api):
         self.total_testcases = 0
         self.seed = ""
 
+        self.start_time = time.time()
+
         #start threads
         self.log("fuzzer started")
         Thread(target=self.ui).start()
@@ -167,7 +169,7 @@ class master(api):
             if "coverage" in testcase:
                 coverage = self.cast_coverage_from_json(testcase["coverage"])
                 new_blocks = self.compute_new_blocks(coverage)
-                self.coverage.update(coverage)
+                self.coverage_update(self.coverage, coverage)
                 del testcase["coverage"]
 
             #append new testcase
@@ -188,7 +190,11 @@ class master(api):
                 self.save_status()
 
                 with open("%s/coverage.csv" % self.seed, "a") as f:
-                    f.write("%d, %d\n" % (self.total_testcases, len(self.coverage)))
+                    f.write("%d, %f" % (self.total_testcases, time.time()-self.t0))
+                    for x in sorted(self.coverage.keys()):
+                        f.write(", %d" % len(self.coverage[x]))
+                    f.write("\n")
+
 
             #handle new crash
             new_crash = False
@@ -236,7 +242,8 @@ class master(api):
             print "Time: %dd:%dh:%dm:%ds" %((t/3600/24)%356, (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"
             covered = len(self.coverage)
-            print "%d covered" % (covered)
+            for x in self.coverage.keys():
+                print "\t%s: %d" % (x, len(self.coverage[x]))
 
             print "\nLog:"
             for message in self._log[-16:]:
@@ -255,6 +262,9 @@ class master(api):
 
             #if time.time() - last_event > 1800:
             #    last_event = time.time()
+            #    self.stop()
+
+            #if time.time() - self.start_time > 10:
             #    self.stop()
 
 

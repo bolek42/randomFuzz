@@ -194,7 +194,10 @@ class api:
                 queue.put(update)
 
             if len(update["testcase_update"]) > 0:
-                print "Got %d new Testcases %d Total; Coverage: %d" % (len(update["testcase_update"]), len(self.testcases), len(self.coverage)) #XXX stringify
+                cov = ""
+                for x in self.coverage.keys():
+                    cov = "%s: %d  " % (x, len(self.coverage[x]))
+                print "Got %d new Testcases %d Total; Coverage: %s" % (len(update["testcase_update"]), len(self.testcases), cov)
 
             #report
             report = {}
@@ -238,11 +241,20 @@ class api:
             ret[k] = list(coverage[k])
         return ret
 
-    def compute_new_blocks(self, coverage):
+    def compute_new_blocks(self, coverage, ref=None):
+        if ref is None:
+            ref = self.coverage
         new_blocks = 0
         for k in coverage:
-            if k in self.coverage:
-                new_blocks += len(coverage[k].difference(self.coverage[k]))
+            if k in ref:
+                new_blocks += len(coverage[k].difference(ref[k]))
             else:
                 new_blocks += len(coverage[k])
         return new_blocks
+
+    def coverage_update(self, ref, coverage):
+        for k in coverage:
+            if k in ref:
+                ref[k].update(coverage[k])
+            else:
+                ref[k] = coverage[k]
