@@ -12,10 +12,18 @@ class api:
         pass
 
     def recv(self, s):
-        n = struct.unpack('<I',s.recv(4))[0]
+        while True:
+            try: #error: [Errno 4] Interrupted system call
+                n = struct.unpack('<I',s.recv(4))[0]
+                break
+            except:
+                pass
         d = ""
         while len(d) < n:
-            d += s.recv(n-len(d))
+            try:
+                d += s.recv(n-len(d))
+            except:
+                pass
         return json.loads(d)
 
     def send(self, s, data):
@@ -34,9 +42,12 @@ class api:
         s.setblocking(1)
         self.sock = s
         while True:
-            conn, addr = s.accept()
-            self.connections += [conn]
-            Thread(target=self.client_handler, args=(conn,)).start()
+            try:
+                conn, addr = s.accept()
+                self.connections += [conn]
+                Thread(target=self.client_handler, args=(conn,)).start()
+            except:
+                pass
 
     def client_handler(self, conn):
         print "worker connected"
@@ -46,7 +57,7 @@ class api:
         provision["env"] = self.env
         provision["seed"] = os.path.basename(self.seed)
         provision["ext"] = self.ext
-        provision["coverage"] = self.coverage
+        provision["coverage"] = self.cast_coverage_to_json(self.coverage)
         provision["crash"] = self.crash
 
         with open("seeds/" + self.seed, "r") as f:
@@ -55,18 +66,20 @@ class api:
         #add known testcases
         testcases = []
         last_tid = 0
-        for i in xrange(last_tid):
-            if not os.path.exists("%s/testcase-%d.json" % (self.seed, i)):
+        while True:
+            if not os.path.exists("%s/testcase-%d.json" % (self.seed, last_tid)):
                 break
-            with open("%s/testcase-%d.json" % (self.seed, i), "r") as f:
+            with open("%s/testcase-%d.json" % (self.seed, last_tid), "r") as f:
                 testcases += [b64encode(f.read())]
-                last_tid += 1
+            last_tid += 1
         provision["testcases"] = b64encode(json.dumps(testcases))
 
         #add files
         provision["files"] = {}
+        print self.files
         for fname in self.files:
-            f = open(fname, "rb")
+            print fname
+            f = open("files/"+fname, "rb")
             provision["files"][fname] = b64encode(f.read())
             f.close()
 
@@ -86,9 +99,8 @@ class api:
             update["testcase_update"] = self.testcases[last_tid:]
             last_tid += len(update["testcase_update"])
 
-            update["coverage_update"] = {}
             if len(update["testcase_update"]) > 0:
-                update["coverage_update"] = self.coverage
+                update["coverage_update"] = self.cast_coverage_to_json(self.coverage)
 
             update["crash"] = self.crash
             try:
@@ -140,7 +152,7 @@ class api:
 
         #generic
         self.cmd = provision["cmd"]
-        self.coverage = provision["coverage"]
+        self.coverage = self.cast_coverage_from_json(provision["coverage"])
         self.crash = provision["crash"]
         self.ext = provision["ext"]
         self.seed = provision["seed"]
@@ -182,12 +194,7 @@ class api:
                 queue.put(update)
 
             if len(update["testcase_update"]) > 0:
-                print "Got %d new Testcases %d Total; Coverage:" % (len(update["testcase_update"]), len(self.testcases)),
-                for s in self.coverage:
-                    covered = bin(self.coverage[s]).count("1")
-                    missing = bin(~self.coverage[s]).count("0")
-                    print "%s: %d" % (s,covered),
-                print "\n",
+                print "Got %d new Testcases %d Total; Coverage: %d" % (len(update["testcase_update"]), len(self.testcases), len(self.coverage)) #XXX stringify
 
             #report
             report = {}
@@ -208,6 +215,7 @@ class api:
                     t = self.testcase_report.get()
                     self.testcase_report.put(t)
 
+                t["coverage"] = self.cast_coverage_to_json(t["coverage"])
                 report["testcase_report"].append(t)
                 i += 1
 
@@ -215,3 +223,26 @@ class api:
             executed_testcases_old =  self.executed_testcases.value
                 
             self.send(self.sock, report)
+
+    def cast_coverage_from_json(self, coverage):
+        new_blocks = 0
+        ret = {}
+        for k in coverage:
+            ret[k] = set(coverage[k])
+        return ret
+
+    def cast_coverage_to_json(self, coverage):
+        new_blocks = 0
+        ret = {}
+        for k in coverage:
+            ret[k] = list(coverage[k])
+        return ret
+
+    def compute_new_blocks(self, coverage):
+        new_blocks = 0
+        for k in coverage:
+            if k in self.coverage:
+                new_blocks += len(coverage[k].difference(self.coverage[k]))
+            else:
+                new_blocks += len(coverage[k])
+        return new_blocks

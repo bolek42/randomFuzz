@@ -86,7 +86,7 @@ if what == "init":
     cfg["cmd"] = cmd
     cfg["files"] = map(os.path.basename, args)
     cfg["env"] = {}
-    cfg["env"]["ASAN_OPTIONS"] = "coverage=1:coverage_bitset=1:symbolize=1"
+    cfg["env"]["ASAN_OPTIONS"] = "coverage=1:symbolize=1"
     cfg["env"]["MALLOC_CHECK_"] = "0"
     cfg["env"]["PATH"] = "%s/asan-builds/bin/:%s/asan-builds/sbin/" % (home,home)
     cfg["env"]["LD_LIBRARY_PATH"] = "%s/asan-builds/lib/" % home
@@ -103,17 +103,14 @@ elif what == "fuzz":
     cfg = load_json("%s/cfg.json" % workdir)
     f = master(cfg, workdir, port)
     while True:
-	seeds = glob.glob("seeds/*")
-	shuffle(seeds)
+        seeds = glob.glob("seeds/*")
+        shuffle(seeds)
         for seed in seeds:
             try:
                 f.fuzz(seed)
-            except KeyboardInterrupt:
-                f.stop()
-                try:
-                    time.sleep(1)
-                except:
-                    os.kill(os.getpid(), 9)
+            except:
+                import traceback; traceback.print_exc()
+                os.kill(os.getpid(), 9)
 
 elif what == "work":
     #set up worker
@@ -125,9 +122,7 @@ elif what == "work":
             w.run()
         except:
             import traceback; traceback.print_exc()
-            w.stop()
-        time.sleep(1)
-        os.kill(os.getpid(), 9)
+            os.kill(os.getpid(), 9)
 
 elif what == "crash-fuzz":
     print cmd

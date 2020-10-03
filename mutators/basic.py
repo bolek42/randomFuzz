@@ -18,14 +18,15 @@ class basic(seeds):
 
         self.mutations = []
         self.mutations.append(self.bitflip)
-        self.mutations.append(self.byteflip)
-        self.mutations.append(self.arith)
-        self.mutations.append(self.arith_full)
+        #self.mutations.append(self.byteflip)
+        self.mutations.append(self.random_byte)
+        #self.mutations.append(self.arith)
+        #self.mutations.append(self.arith_full)
         self.mutations.append(self.duplicate)
-        self.mutations.append(self.delete)
-        self.mutations.append(self.replace)
-        self.mutations.append(self.insert)
-        self.mutations.append(self.insert_add)
+        #self.mutations.append(self.delete)
+        #self.mutations.append(self.replace)
+        #self.mutations.append(self.insert)
+        #self.mutations.append(self.insert_add)
 
     def mutate_seed(self, testcase, data):
         mut = []
@@ -117,6 +118,22 @@ class basic(seeds):
             for j in xrange(n):
                 f += chr(ord(t[offset+j]) ^ 0xff)
             t = t[:offset] + f + t[offset+n:]
+            return t
+
+    def random_byte(self, state=None, data=None):
+        if state is None:
+            state = {"random_byte": {}}
+            i = state["random_byte"]["i"] = randrange(256)
+            state["description"] = "random_byte %d" % i
+            return state
+
+        i = state["random_byte"]["i"]
+        offset = state["offset"]
+
+        #mutate
+        if data is not None:
+            t = data
+            t = t[:offset] + chr( (ord(t[offset]) + i)%256 ) + t[offset+1:]
             return t
 
 

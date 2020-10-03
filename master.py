@@ -32,7 +32,7 @@ class master(api):
         #global config
         self.cmd = cfg["cmd"]
         self.env = cfg["env"]
-        self.files = []
+        self.files = cfg["files"]
         self.crash_id = 0
         if os.path.exists("crash.json"):
             self.crash = load_json("crash.json")
@@ -41,7 +41,7 @@ class master(api):
 
         #fuzzing state
         self.testcases = []
-        self.coverage = {}
+        self.coverage = dict()
         self.t0 = time.time()
         self.total_testcases = 0
         self.seed = ""
@@ -105,27 +105,25 @@ class master(api):
             try:
                 status = load_json("%s/status.json" % self.seed)
                 self.t0 = time.time() - status["execution_time"]
-                self.coverage = status["coverage"]
+                self.coverage = self.cast_coverage_from_json(status["coverage"])
                 self.total_testcases = status["total_testcases"]
             except:
                 self.t0 = time.time()
-                self.coverage = {}
+                self.coverage = dict()
                 self.total_testcases
                 
         else:
             self.t0 = time.time()
-            self.coverage = {}
+            self.coverage = dict()
             self.total_testcases
 
         if len(self.testcases) > 0:
-            for s in self.coverage:
-                covered = bin(self.coverage[s]).count("1")
-                missing = bin(~self.coverage[s]).count("0")
-                self.log("%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing)))
+            covered = len(self.coverage)
+            self.log("%d covered" % (covered))
 
     def save_status(self):
         status = {}
-        status["coverage"] = self.coverage
+        status["coverage"] = self.cast_coverage_to_json(self.coverage)
         status["execution_time"] = time.time() - self.t0
         status["total_testcases"] = self.total_testcases
         save_json("%s/status.json" % self.seed, status)
@@ -143,6 +141,13 @@ class master(api):
             pass
 
     def process_report(self):
+        try:
+            self._process_report()
+        except:
+            import traceback; traceback.print_exc()
+            os.kill(os.getpid(), 9)
+
+    def _process_report(self):
         print "update processor started"
         while True:
             testcase = self.report_queue.get()
@@ -160,22 +165,14 @@ class master(api):
 
             #update coverage if not crashed
             if "coverage" in testcase:
-                coverage = testcase["coverage"]
-
-                for s in coverage:
-                    if s not in self.coverage: self.coverage[s] = 0
-                new_blocks = 0
-                blocks = 0
-                for s in coverage:
-                    bitset = int(coverage[s])
-                    blocks += bin(bitset).count("1")
-                    new_blocks += bin((~self.coverage[s]) & bitset).count("1")
-                    self.coverage[s] |= bitset
+                coverage = self.cast_coverage_from_json(testcase["coverage"])
+                new_blocks = self.compute_new_blocks(coverage)
+                self.coverage.update(coverage)
+                del testcase["coverage"]
 
             #append new testcase
             if new_blocks > 0:
                 testcase["new_blocks"] = new_blocks
-                testcase["blocks"] = blocks
                 testcase["id"] = len(self.testcases)
                 testcase["childs"] = []
                 log.append("New Blocks: %d Parent: %d Description: %s" % (new_blocks, testcase["parent_id"], testcase["description"]))
@@ -185,9 +182,13 @@ class master(api):
                 self.testcases.append(testcase)
 
                 pid = testcase["parent_id"]
-                self.testcases[pid]["childs"] += [testcase["id"]]
-                save_json("%s/testcase-%d.json" % (self.seed, pid),self.testcases[pid])
+                if testcase["id"] > 0 and len(self.testcases) < testcase["id"]:
+                    self.testcases[pid]["childs"] += [testcase["id"]]
+                    save_json("%s/testcase-%d.json" % (self.seed, pid),self.testcases[pid])
                 self.save_status()
+
+                with open("%s/coverage.csv" % self.seed, "a") as f:
+                    f.write("%d, %d\n" % (self.total_testcases, len(self.coverage)))
 
             #handle new crash
             new_crash = False
@@ -213,7 +214,7 @@ class master(api):
         log_old = ""
         while True:
             time.sleep(1)
-            
+            self.apply_update()
             #determine testaces per second
             stop = time.time()
             alpha =  0.5
@@ -232,16 +233,15 @@ class master(api):
             print "Worker: %d" % self.connected_worker.value
             print "Report Queue: %d" % self.report_queue.qsize()
             t = time.time() - self.t0
-            print "Time: %dd:%dh:%dm:%ds" %((t/3600/24), (t/3600)%60, (t/60)%60, t%60)
+            print "Time: %dd:%dh:%dm:%ds" %((t/3600/24)%356, (t/3600)%60, (t/60)%60, t%60)
             print "\nCoverage:"
-            for s in self.coverage:
-                covered = bin(self.coverage[s]).count("1")
-                missing = bin(~self.coverage[s]).count("0")
-                print "%s: %d covered, %d missing, coverage: %.2f%%" % (s,covered,missing,100*covered/float(covered+missing))
+            covered = len(self.coverage)
+            print "%d covered" % (covered)
 
             print "\nLog:"
             for message in self._log[-16:]:
                 print message
+
             t = time.time() - self.t0
             print "%dd %02dh %02dm %02ds" %((t/3600/24)%365, (t/3600)%60, (t/60)%60, t%60)
 
@@ -249,15 +249,14 @@ class master(api):
                 last_event = time.time()
                 log_old = self._log[-1]
 
-            if time.time() - last_event > 100 and len(self.testcases) == 0:
-                last_event = time.time()
-                self.stop()
+            #if time.time() - last_event > 100 and len(self.testcases) == 0:
+            #    last_event = time.time()
+            #    self.stop()
 
-            if time.time() - last_event > 1800:
-                last_event = time.time()
-                self.stop()
+            #if time.time() - last_event > 1800:
+            #    last_event = time.time()
+            #    self.stop()
 
-            self.apply_update()
 
     def log(self, msg):
         t = time.time() - self.t0

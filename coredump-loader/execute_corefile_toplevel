@@ -1,0 +1,4 @@
+#!/bin/bash
+execfnmae=$(./get_exec $1)
+./inject $execfnmae trampolin.bin
+./patched.elf loader.bin $1

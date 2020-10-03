@@ -25,7 +25,7 @@ class worker(api):
         self.update_queues = []
         self.testcase_report = Queue()
 
-        self.coverage = {}
+        self.coverage = dict()
         self.testcases = []
         self.executed_testcases = Value('i', 0)
 
@@ -59,13 +59,16 @@ class worker(api):
             for t in update["testcase_update"]:
                 pid = t["parent_id"]
                 self.testcases += [t]
-                if t["id"] > 0:
+                if t["id"] > 0 and t["id"] < len(self.testcases):
                     self.testcases[pid]["childs"] += [t["id"]]
 
             self.mutator.random_merge_cache = {}
 
-        for s,coverage in update["coverage_update"].iteritems():
-            self.coverage[s] = coverage
+        if "coverage_update" in update:
+            for k in update["coverage_update"].keys():
+                if k not in self.coverage:
+                    self.coverage[k] = set()
+                self.coverage[k].update(set(update["coverage_update"][k]))
 
         self.crash = update["crash"]
 
@@ -82,24 +85,22 @@ class worker(api):
         self.executed_testcases.value += 1
         try:
             data = self.mutator.mutate_seed(testcase, self.seed_data)
-            stderr, crash, coverage = self.executor.call_sancov(data, self.ext)
-            self.process_result(testcase, stderr, crash, coverage, data)
+            stderr, crash, coverage = self.executor.call(data, self.ext)
+            if len(coverage) > 0:
+                self.process_result(testcase, stderr, crash, coverage, data)
         except:
             import traceback; traceback.print_exc()
             pass
 
+
     #detect new edges/crashes and appends to report queues
     def process_result(self, testcase, stderr, crash, coverage, binary):
-        for s in coverage:
-            if s not in self.coverage: self.coverage[s] = 0
-
-        testcase["coverage"] = coverage
+        testcase["coverage"] = (coverage)
         testcase["bin"] = b64encode(binary)
 
         #detect new crash
         if crash and crash not in self.crash:
             print "New crash %s" % crash
-            print testcase["bin"]
             testcase["crash"] = crash
             testcase["stderr"] = stderr
             self.testcase_report.put(testcase)
@@ -108,14 +109,11 @@ class worker(api):
 
         #found new blocks, requeue to remove unused mutations
         if "minimize" not in testcase:
-            new_blocks = 0
-            for s in coverage:
-                c = int(coverage[s])
-                new_blocks += (~self.coverage[s]) & c
+            new_blocks = self.compute_new_blocks(coverage)
 
             if new_blocks > 0:
                 #remove unused mutations
-                testcase["new_blocks"] = bin(new_blocks).count("1")
+                testcase["new_blocks"] = new_blocks
                 minimize = {}
                 minimize["i"] = 0
                 minimize["reference"] = deepcopy(testcase)
@@ -130,19 +128,12 @@ class worker(api):
             #test if testcase covered equal or more blocks
             ge = False
             if not crash: 
-                new_blocks = 0
-                for s in testcase["coverage"]:
-                    c = int(coverage[s])
-                    new_blocks += bin((~self.coverage[s]) & c).count("1")
+                new_blocks = self.compute_new_blocks(coverage)
 
                 testcase["new_blocks"] = new_blocks
                 if new_blocks >= reference["new_blocks"]:
                     ge = True
 
-            nb2 = 0
-            for s in reference["coverage"]:
-                coverage = int(reference["coverage"][s])
-                nb2 += bin((~self.coverage[s]) & coverage).count("1")
             #done
             if i >= len(testcase["mutations"]) - 1:
                 if not ge:
@@ -157,10 +148,7 @@ class worker(api):
                 print "Minimized testcase: New blocks: %d Parent: %d Description: %s " % (testcase["new_blocks"], testcase["id"], testcase["description"]),
                 print "Mutations: %d" % len(testcase["mutations"]), 
                 print "Report Queue: %d" % self.testcase_report.qsize()
-                new_blocks = 0
-                for s in testcase["coverage"]:
-                    coverage = int(testcase["coverage"][s])
-                    new_blocks += bin((~self.coverage[s]) & coverage).count("1")
+                new_blocks = self.compute_new_blocks(coverage)
                 self.testcase_report.put(testcase)
                 return
 
@@ -219,7 +207,7 @@ class worker(api):
 
             #mutate
             if tid == 0:
-                mutated = self.mutator.random_mutation(testcase ,maximum=8, mutations=[0,1,2])
+                mutated = self.mutator.random_mutation(testcase ,maximum=8)
             else:
                 mutated = self.mutator.random_mutation(testcase ,maximum=8)
             mutated["parent_id"] = tid
